@@ -7,6 +7,7 @@
 #include <string>
 #include <random>
 #include <unordered_set>
+#include <unordered_map>
 using namespace std;
 
 // g++ -Wall -std=c++11 -o rf rf.cc
@@ -161,7 +162,8 @@ public:
         return true;
     }
 
-    DataRow& operator[](unsigned int i) { return rows[i]; }
+          DataRow& operator[](unsigned int i)       { return rows[i]; }
+    const DataRow& operator[](unsigned int i) const { return rows[i]; }
 
     ostream& print(ostream& out, int nrows=-1) const {
         copy( rows.cbegin(),
@@ -180,7 +182,9 @@ private:
         Variable value;
         int position;
         int left_child, right_child;
-        Node(void) : value(), position(0), left_child(0), right_child(0){}
+        Node(void) : value(),  position(0), left_child(0), right_child(0){}
+        explicit Node(double v) : value((double)    v), position(0), left_child(0), right_child(0){}
+        explicit Node(long   v) : value((long long) v), position(0), left_child(0), right_child(0){}
     };
     friend class RandomForest;
     vector<Node> nodes;
@@ -235,7 +239,7 @@ public:
                     mtry,
                     [&uid,&uid_l,&dre,&schema](void){
                         unsigned int idx = uid(dre);
-                        unsigned int level = (schema[idx]>1 ? uid_l(dre)%schema[idx] : 1);
+                        unsigned int level = (schema[idx]>1 ? uid_l(dre)%schema[idx] : 0);
                         return pair<unsigned int,unsigned int>(idx,level);
                     }
         );
@@ -257,15 +261,144 @@ public:
         return vector<unsigned int>(retval.begin(), retval.begin() + (nSampled<nTotal?nSampled:nTotal));
     }
 
-    pair<unsigned int, Variable> pickStrongestCut(const DataFrame& df,
-                                                  unsigned int targetIdx,
-                                                  const Splits& splits,
-                                                  const vector<unsigned int>& sample = {}
-                                                 ){
-        // LDA?
-        ;
-//    purity/gini/entrophy/rms
-        return pair<unsigned int, Variable>();
+    // simplest forward-stepwise
+    Tree pickStrongestCuts(const DataFrame& df,
+                           unsigned int targetIdx,
+                           const Splits& splits,
+                           const vector<unsigned int>& subset = {}
+    ){
+        // LDA for categorical target?
+        // other metrics: purity/gini/entrophy/rms
+
+        if( subset.size() == 0 ) return Tree();
+
+        // end of recursion
+        if( splits.empty() ){
+            double sum = accumulate(next(subset.begin()),
+                                    subset.end(),
+                                    subset[0],
+                                    [&df, &targetIdx](int i, int j){
+                                        return df[i][targetIdx].asFloating + df[j][targetIdx].asFloating;
+                                    }
+                         );
+            Tree leaf;
+            leaf.nodes.push_back( Tree::Node( sum/subset.size() ) );
+            return leaf;
+        }
+
+        // for continuous target simply calculate correlations and pick the strongest; ignore the outliers?
+//        if( df[0][targetIdx].type == Variable::Continuous ){
+            // from https://github.com/koskot77/clustcorr/blob/master/src/utilities.cc
+            unsigned int size = subset.size();
+
+            double varTarget = 0, meanTarget = 0;
+            for(unsigned int i=0; i<size; ++i){
+                unsigned int row = subset[i];
+                varTarget  += df[row][targetIdx].asFloating * df[row][targetIdx].asFloating;
+                meanTarget += df[row][targetIdx].asFloating;
+            }
+            double sdTarget = sqrt((varTarget - meanTarget*meanTarget/size)/(size - 1));
+            meanTarget /= size;
+
+            struct HashPair { size_t operator()(const pair<unsigned int,unsigned int>& p) const { return p.first*10 + p.second; } };
+            unordered_map<pair<unsigned int,unsigned int>, double, HashPair> corr;
+            for(pair<unsigned int,unsigned int> pick : splits){
+                double var, crossVar, mean;
+                for(unsigned int i=0; i<size; ++i){
+                    unsigned int row = subset[i];
+                    if( df.getSchema()[ pick.first ] == 1 ){
+                        mean     += df[row][pick.first].asFloating;
+                        var      += df[row][pick.first].asFloating * df[row][pick.first].asFloating;
+                        crossVar += df[row][pick.first].asFloating * df[row][targetIdx].asFloating;
+                    } else {
+                        mean     += (df[row][pick.first].asIntegral == pick.second);
+                        var      += (df[row][pick.first].asIntegral == pick.second);
+                        crossVar += (df[row][pick.first].asIntegral == pick.second) * df[row][targetIdx].asFloating;
+                    }
+                }
+                double sd = sqrt((var - mean*mean/size)/(size - 1));
+                mean /= size;
+                corr[pick] = size/double(size-1) * (crossVar/size-meanTarget*mean) / sdTarget / sd ;
+            }
+
+            unordered_map<pair<unsigned int,unsigned int>, double, HashPair>::const_iterator bestCut = 
+                max_element(corr.cbegin(),
+                            corr.cend(),
+                            [](pair<pair<unsigned int,unsigned int>, double> a, pair<pair<unsigned int,unsigned int>, double> b){
+                                return a.second < b.second;
+                            }
+                );
+
+            Splits remainingSplits;
+            copy_if( splits.cbegin(),
+                     splits.cend(),
+                     back_inserter(remainingSplits),
+                     [&bestCut](pair<unsigned int,unsigned int> s){
+                         // can recycle remaining levels
+                         return s.first != bestCut->first.first || s.second != bestCut->first.second;
+                     }
+            );
+            vector<unsigned int> left_subset, right_subset;
+            double median_cut = 0;
+            if( df.getSchema()[bestCut->first.first] == 1 ){
+                unsigned int size = subset.size();
+                vector<double> vals(size);
+                for(unsigned int i=0; i<size; ++i)
+                    vals[i] = df[subset[i]][bestCut->first.first].asFloating;
+                nth_element(vals.begin(), vals.begin() + size/2, vals.end());
+                median_cut = vals[size/2];
+            }
+            for(unsigned int i : subset)
+                switch(  df[i][bestCut->first.first].type ){
+                    case Variable::Continuous :
+                        if( df[i][bestCut->first.first].asFloating < median_cut )
+                            left_subset.push_back(i);
+                        else
+                            right_subset.push_back(i);
+                    break ;
+                    case Variable::Categorical:
+                        if( df[i][bestCut->first.first].asIntegral == bestCut->first.second )
+                            left_subset.push_back(i);
+                        else
+                            right_subset.push_back(i);
+                    break ;
+                    default : return Tree(); break;
+                }
+
+            // good place to use the thread pool
+            Tree left_subtree  = pickStrongestCuts(df, targetIdx, remainingSplits, left_subset);
+            Tree right_subtree = pickStrongestCuts(df, targetIdx, remainingSplits, right_subset);
+
+            Tree tree;
+            tree.nodes.resize(1 + left_subtree.nodes.size() + right_subtree.nodes.size());
+            // copy the local root node
+            Tree::Node& local_root = tree.nodes[0];
+            local_root.position = bestCut->first.first;
+            local_root.left_child = (left_subtree.nodes.size()?1:0); // left subtree (if exists) is placed right after the root -> index=1
+            transform(left_subtree.nodes.cbegin(), // source from
+                      left_subtree.nodes.cend(),   // source till
+                      tree.nodes.begin() + 1, // destination
+                      [] (Tree::Node node) {
+                          // increment indecies only for existing children, left 0 for non-existing
+                          if( node.left_child ) node.left_child  += 1;
+                          if( node.right_child) node.right_child += 1;
+                          return node;
+                      }
+            );
+            unsigned int offset = left_subtree.nodes.size();
+            local_root.right_child = (offset+right_subtree.nodes.size() ? 1 + offset : 0); // right subtree is placed after the left one
+            transform(right_subtree.nodes.cbegin(), // source from
+                      right_subtree.nodes.cend(),   // source till
+                      tree.nodes.begin() + 1 + offset, // destination
+                      [offset] (Tree::Node node) {
+                          // increment indecies only for existing children, left 0 for non-existing
+                          if( node.left_child ) node.left_child  += 1 + offset;
+                          if( node.right_child) node.right_child += 1 + offset;
+                          return node;
+                      }
+            );
+            return tree;
+//        }
     }
 
     vector<Tree> ensemble;
@@ -275,27 +408,12 @@ public:
     int   classify(const DataRow& row) const { return 0; }
 
     void train(const DataFrame& df, unsigned int targetIdx) {
+        if( df.nrow() < 1 ) return ;
         rState.seed(0);
         const int nTrees = 40;
         for(unsigned int t=0; t<nTrees; t++){
             Splits splits( generateRandomSplits( df.getSchema(), (unsigned int)sqrt(df.ncol()) ) );
-            Tree tree;
-            // forward-stepwise
-            while( !splits.empty() ){
-                pair<unsigned int, Variable> cut = pickStrongestCut(df,targetIdx,splits,sample(df.nrow(),df.nrow()*0.5));
-
-                tree.nodes ;
-
-                splits.erase(
-                    remove_if(
-                        splits.begin(),
-                        splits.end(),
-                        [cut](pair<unsigned int,unsigned int> s){
-                            return s.first == cut.first;
-                        }
-                    )
-                );
-            }
+            Tree tree = pickStrongestCuts(df,targetIdx,splits,sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
         }
         
