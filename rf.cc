@@ -1,5 +1,6 @@
 #include <iostream>
 #include <tuple>
+#include <list>
 #include <vector>
 #include <iterator>
 #include <algorithm>
@@ -13,7 +14,7 @@ using namespace std;
 // No better solution for the type-obsessed languages but to create a type
 //  that can play for the both sides
 struct Variable {
-    enum Type { Unknown=0, Categorical=1, Continuous=2 };
+    enum Type { Unknown=0, Categorical=1, Continuous=2 }; // Categorical is always considered unordered below
     Type type;
     union {
         long long asIntegral;
@@ -222,49 +223,50 @@ class RandomForest {
 private:
 public:
     // note, number of splits the is not always mtry-sized!
-    typedef vector<pair<unsigned int,unsigned int>> Splits; // variable index, level (if categorical)
+    typedef list<pair<unsigned int,unsigned int>> Splits; // variable index, level (if categorical)
 
     std::default_random_engine rState;
 
     Splits generateRandomSplits(const vector<unsigned int> &schema, unsigned int mtry){
         Splits splits;
         default_random_engine dre(rState);
-        uniform_int_distribution<> uid(0, schema.size());
-        splits.resize(0);
+        uniform_int_distribution<unsigned int> uid(0, schema.size()-1), uid_l;
         generate_n( back_inserter(splits),
                     mtry,
-                    [&uid,&dre](void){
-                        return pair<unsigned int,unsigned int>(uid(dre),1);
+                    [&uid,&uid_l,&dre,&schema](void){
+                        unsigned int idx = uid(dre);
+                        unsigned int level = (schema[idx]>1 ? uid_l(dre)%schema[idx] : 1);
+                        return pair<unsigned int,unsigned int>(idx,level);
                     }
         );
-        for(unsigned int i=0; i<splits.size(); i++)
-            if( schema[ splits[i].first ] > 1 ){
-                uniform_int_distribution<> uid(0, splits[i].first);
-                splits[i].second = uid(dre);
-            }
         return splits;
     }
 
-    vector<unsigned int> sample(unsigned int nTotal, unsigned int nSampled, bool repeats = false){
+    vector<unsigned int> sample(unsigned int nTotal, unsigned int nSampled, bool replace = false){
         // definitely, there is room for improvement below
         vector<unsigned int> retval(nTotal);
-        if( !repeats ){
+        if( !replace ){
             unsigned int i=0;
             generate_n(retval.begin(), nTotal, [i](void) mutable { return ++i; });
             shuffle(retval.begin(),retval.end(),rState);
         } else {
             default_random_engine dre(rState);
             uniform_int_distribution<> uid(0, nTotal);
-            generate_n( retval.begin(), nSampled, [&uid,&dre](void){ return uid(dre); } );
+            generate_n( retval.begin(), (nSampled<nTotal?nSampled:nTotal), [&uid,&dre](void){ return uid(dre); } );
         }
-        return vector<unsigned int>(retval.begin(), retval.begin() + nSampled);
+        return vector<unsigned int>(retval.begin(), retval.begin() + (nSampled<nTotal?nSampled:nTotal));
     }
 
-    pair<unsigned int, Variable> pickStrongestCut(const DataFrame& df, const Splits& splits){
+    pair<unsigned int, Variable> pickStrongestCut(const DataFrame& df,
+                                                  unsigned int targetIdx,
+                                                  const Splits& splits,
+                                                  const vector<unsigned int>& sample = {}
+                                                 ){
+        // LDA?
+        ;
 //    purity/gini/entrophy/rms
         return pair<unsigned int, Variable>();
     }
-
 
     vector<Tree> ensemble;
 
@@ -278,9 +280,12 @@ public:
         for(unsigned int t=0; t<nTrees; t++){
             Splits splits( generateRandomSplits( df.getSchema(), (unsigned int)sqrt(df.ncol()) ) );
             Tree tree;
-            // forward stepwise
+            // forward-stepwise
             while( !splits.empty() ){
-                pair<unsigned int, Variable> cut = pickStrongestCut(df,splits);
+                pair<unsigned int, Variable> cut = pickStrongestCut(df,targetIdx,splits,sample(df.nrow(),df.nrow()*0.5));
+
+                tree.nodes ;
+
                 splits.erase(
                     remove_if(
                         splits.begin(),
@@ -291,8 +296,6 @@ public:
                     )
                 );
             }
-            //splits;
-            //tree.nodes;
             ensemble.push_back( move(tree) );
         }
         
