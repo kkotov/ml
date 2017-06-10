@@ -99,13 +99,16 @@ ostream& operator<< (ostream& out, const DataRow& dr) { return dr.operator<<(out
 // abstraction for grouping DataRows together
 class DataFrame {
 private:
-    vector<int> schema; // 1 - continuous, >=2 - number of levels in categorical
+    vector<unsigned int> schema; // 1 - continuous, >=2 - number of levels in categorical
     vector<DataRow> rows;
 
 public:
+    const vector<unsigned int>& getSchema(void) const { return schema; }
+    int nrow(void) const { return rows.size(); }
+    int ncol(void) const { return schema.size(); }
 
     template<typename T>
-    bool cbind(const vector<T> &col) {
+    bool cbind(const vector<T> &col, unsigned int nLevels=1) {
         // check if number of rows matchs number of elements in column
         if( col.size() != rows.size() && rows.size() != 0 )
             return false;
@@ -113,17 +116,19 @@ public:
         if( rows.size() == 0 ) rows.resize( col.size() );
         // the two options: categorical/integral and floating/continuous
         if( std::is_integral<T>::value ){
+            for(unsigned i=0; i<col.size(); ++i)
+                rows[i].data.emplace_back((long long)col[i]);
             // deduce number of levels automatically
             unordered_set<long long> unique;
-            for(unsigned i=0; i<col.size(); ++i){
-                rows[i].data.push_back( Variable((long long) col[i]) );
-                unique.insert((long long) col[i]);
-            }
-            // store number of found levels
-            schema.push_back( unique.size() );
+            copy(col.cbegin(), col.cend(), inserter(unique,unique.begin()));
+            // store number of found or provided levels
+            if( nLevels > unique.size() )
+                schema.push_back( nLevels );
+            else
+                schema.push_back( unique.size() );
         } else {
             for(unsigned i=0; i<col.size(); ++i)
-                rows[i].data.push_back( Variable((double)    col[i]) );
+                rows[i].data.emplace_back((double)col[i]);
             // mark the column as continuous
             schema.push_back(1);
         }
@@ -142,7 +147,7 @@ public:
                 [](const Variable& var){ return (var.type == Variable::Categorical ? 2 : 1) ; }
             );
         } else {
-            // make sure we preserve the schema
+            // make sure we preserve the schema but do nothing about number of levels assuming it includes the binded
             if( !equal(row.data.cbegin(), row.data.cend(), schema.cbegin(),
                      [](const Variable& var, int type){
                          return (var.type == Variable::Categorical && type >= 2) ||
@@ -176,8 +181,8 @@ private:
         int left_child, right_child;
         Node(void) : value(), position(0), left_child(0), right_child(0){}
     };
-    friend class Model;
-    vector<Node> tree;
+    friend class RandomForest;
+    vector<Node> nodes;
 
 public:
     Variable traverse(const DataRow& row, const Node& root) const {
@@ -187,27 +192,27 @@ public:
 
         if( root.value.type == Variable::Continuous ){
             if( root.value.asFloating < row[root.position].asFloating )
-                return traverse(row,tree[root.left_child]);
+                return traverse(row,nodes[root.left_child]);
             else
-                return traverse(row,tree[root.right_child]);
+                return traverse(row,nodes[root.right_child]);
         }
         if( root.value.type == Variable::Categorical ){
             // only binary-level categories are managed
             if( root.value.asIntegral == row[root.position].asIntegral )
-                return traverse(row,tree[root.left_child]);
+                return traverse(row,nodes[root.left_child]);
             else
-                return traverse(row,tree[root.right_child]);
+                return traverse(row,nodes[root.right_child]);
         }
         // the root is neither Continuous nor Categorical -> error
         return Variable();
     }
     Variable predict(const DataRow& row) const {
         // is tree initialized? if not return default Variable as a sign of error
-        if( tree.size() == 0 ) return Variable(); 
+        if( nodes.size() == 0 ) return Variable(); 
         // is root node initialized?
-        if( tree[0].value.type == Variable::Unknown ) return Variable(); 
+        if( nodes[0].value.type == Variable::Unknown ) return Variable(); 
         // all looks good
-        return traverse(row,tree[0]);
+        return traverse(row,nodes[0]);
     }
 
 //    load/save
@@ -215,36 +220,85 @@ public:
 
 class RandomForest {
 private:
-    unsigned int nInputs;
+public:
+    // note, number of splits the is not always mtry-sized!
+    typedef vector<pair<unsigned int,unsigned int>> Splits; // variable index, level (if categorical)
 
     std::default_random_engine rState;
 
-    void preProcessDF(void){}
-
-    unordered_set<unsigned int> generateRandomSplits(unsigned int mtry){
-        unordered_set<unsigned int> retval;
-        std::default_random_engine dre(rState);
-        uniform_int_distribution<> uid(0, nInputs);
-        generate_n( inserter(retval,retval.begin()), mtry, [&uid,&dre](void){ return uid(dre); } );
-        return retval; // note, the retval is not always mtry-sized!
+    Splits generateRandomSplits(const vector<unsigned int> &schema, unsigned int mtry){
+        Splits splits;
+        default_random_engine dre(rState);
+        uniform_int_distribution<> uid(0, schema.size());
+        splits.resize(0);
+        generate_n( back_inserter(splits),
+                    mtry,
+                    [&uid,&dre](void){
+                        return pair<unsigned int,unsigned int>(uid(dre),1);
+                    }
+        );
+        for(unsigned int i=0; i<splits.size(); i++)
+            if( schema[ splits[i].first ] > 1 ){
+                uniform_int_distribution<> uid(0, splits[i].first);
+                splits[i].second = uid(dre);
+            }
+        return splits;
     }
 
-    void sample(void){
-
+    vector<unsigned int> sample(unsigned int nTotal, unsigned int nSampled, bool repeats = false){
+        // definitely, there is room for improvement below
+        vector<unsigned int> retval(nTotal);
+        if( !repeats ){
+            unsigned int i=0;
+            generate_n(retval.begin(), nTotal, [i](void) mutable { return ++i; });
+            shuffle(retval.begin(),retval.end(),rState);
+        } else {
+            default_random_engine dre(rState);
+            uniform_int_distribution<> uid(0, nTotal);
+            generate_n( retval.begin(), nSampled, [&uid,&dre](void){ return uid(dre); } );
+        }
+        return vector<unsigned int>(retval.begin(), retval.begin() + nSampled);
     }
 
+    pair<unsigned int, Variable> pickStrongestCut(const DataFrame& df, const Splits& splits){
 //    purity/gini/entrophy/rms
+        return pair<unsigned int, Variable>();
+    }
+
 
     vector<Tree> ensemble;
 
 public:
     double regress(const DataRow& row) const { return 0; }
     int   classify(const DataRow& row) const { return 0; }
-    void train(const DataFrame& df) {
 
+    void train(const DataFrame& df, unsigned int targetIdx) {
+        rState.seed(0);
+        const int nTrees = 40;
+        for(unsigned int t=0; t<nTrees; t++){
+            Splits splits( generateRandomSplits( df.getSchema(), (unsigned int)sqrt(df.ncol()) ) );
+            Tree tree;
+            // forward stepwise
+            while( !splits.empty() ){
+                pair<unsigned int, Variable> cut = pickStrongestCut(df,splits);
+                splits.erase(
+                    remove_if(
+                        splits.begin(),
+                        splits.end(),
+                        [cut](pair<unsigned int,unsigned int> s){
+                            return s.first == cut.first;
+                        }
+                    )
+                );
+            }
+            //splits;
+            //tree.nodes;
+            ensemble.push_back( move(tree) );
+        }
+        
     }
 
-    RandomForest(void) : nInputs(0) {}
+    RandomForest(void){}
 
 //    load/save
 };
@@ -273,11 +327,6 @@ DataFrame oneHOTencode(const vector<int> &col, unordered_set<int> levels = {}, b
     return df;
 }
 
-template <typename... Args>
-double lossFunction(const std::tuple<Args...> p, const std::tuple<Args...> t) noexcept {
-    return 0;
-}
-
 int main(void){
     // A categorical (potentially ordered) predictor type
     enum class cat1 : char { type1, type2, type3 };
@@ -294,8 +343,6 @@ int main(void){
         make_tuple(3)
     };
 
-//    RandomForests rf;
-
 //    DataRow row(predictors[1]);
 
 //    DataFrame (predictors,targets)
@@ -308,6 +355,11 @@ int main(void){
 //    cout << df << endl;
 
     cout << oneHOTencode(col) << endl;
+
+    RandomForest rf;
+    vector<unsigned int> s = rf.sample(10,5);
+    copy(s.begin(), s.end(), ostream_iterator<unsigned int>(cout," "));
+    cout<<endl;
 
 //    rf.train(predictors,targets,lossFunction);
 //    fr.trees();
