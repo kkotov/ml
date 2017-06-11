@@ -232,14 +232,14 @@ public:
 
     std::default_random_engine rState;
 
-    Splits generateRandomSplits(const vector<unsigned int> &schema, unsigned int mtry){
+    Splits generateRandomSplits(const vector<unsigned int> &schema, const vector<unsigned int>& predictorsIdx, unsigned int mtry){
         Splits splits;
         default_random_engine dre(rState);
-        uniform_int_distribution<unsigned int> uid(0, schema.size()-1), uid_l;
+        uniform_int_distribution<unsigned int> uid(0, predictorsIdx.size()-1), uid_l;
         generate_n( back_inserter(splits),
                     mtry,
-                    [&uid,&uid_l,&dre,&schema](void){
-                        unsigned int idx = uid(dre);
+                    [&uid,&uid_l,&dre,&schema,&predictorsIdx](void){
+                        unsigned int idx = predictorsIdx[ uid(dre) ];
                         unsigned int level = (schema[idx]>1 ? uid_l(dre)%schema[idx] : 0);
                         return pair<unsigned int,unsigned int>(idx,level);
                     }
@@ -301,8 +301,6 @@ public:
             double sdTarget = sqrt((varTarget - meanTarget*meanTarget/size)/(size - 1));
             meanTarget /= size;
 
-cout << "sdTarget= " << sdTarget << " meanTarget= " << meanTarget << endl;
-
             struct HashPair { size_t operator()(const pair<unsigned int,unsigned int>& p) const { return p.first*10 + p.second; } };
             unordered_map<pair<unsigned int,unsigned int>, double, HashPair> corr;
             for(pair<unsigned int,unsigned int> pick : splits){
@@ -331,9 +329,6 @@ cout << "sdTarget= " << sdTarget << " meanTarget= " << meanTarget << endl;
                                 return a.second < b.second;
                             }
                 );
-
-cout << " Best Cut! " << endl;
-cout << bestCut->first.first << " " << bestCut->first.second << " cor = " << bestCut->second << endl;
 
             Splits remainingSplits;
             copy_if( splits.cbegin(),
@@ -413,15 +408,13 @@ public:
     double regress(const DataRow& row) const { return 0; }
     int   classify(const DataRow& row) const { return 0; }
 
-    void train(const DataFrame& df, unsigned int targetIdx) {
+    void train(const DataFrame& df, const vector<unsigned int>& predictorsIdx, unsigned int targetIdx) {
         if( df.nrow() < 1 ) return ;
         rState.seed(0);
         const int nTrees = 40;
         for(unsigned int t=0; t<nTrees; t++){
-            Splits splits( generateRandomSplits( df.getSchema(), (unsigned int)sqrt(df.ncol()) ) );
-
-for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
-
+            Splits splits( generateRandomSplits( df.getSchema(), predictorsIdx, (unsigned int)sqrt(predictorsIdx.size()) ) );
+            //for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
             Tree tree = pickStrongestCuts(df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
         }
@@ -494,20 +487,70 @@ int main(void){
 
     input.imbue(std::locale(std::locale(), new field_reader()));
 
-    copy_n(istream_iterator<string>(input), 53, ostream_iterator<string>(cout," "));
-    cout << endl;
+    unordered_map<string,unsigned int> dict;
+    class my_dict_output_iterator : public iterator<output_iterator_tag,typename unordered_map<string,unsigned int>::value_type> {
+        private:
+            unsigned int counter;
+        protected:
+            unordered_map<string,unsigned int>& container;
+        public:
+            explicit my_dict_output_iterator(unordered_map<string,unsigned int> &c) : counter(0), container(c){ }
+            my_dict_output_iterator operator= (const string& str){
+                container.insert( make_pair(str,counter++) );
+                return *this;
+            }
+            my_dict_output_iterator& operator*  (void){ return *this; }
+            my_dict_output_iterator& operator++ (void){ return *this; }
+            my_dict_output_iterator& operator++ (int) { return *this; }
+    };
+    copy_n(istream_iterator<string>(input), 53, my_dict_output_iterator(dict));
+
+//    for(auto d : dict) cout << d.first << " - " << d.second << endl;
+//    cout << endl;
 
     typedef tuple<int,float,float,float,int,float,float,float,float,float,float,int,int,int,int,int,int,int,int,int,int,int,int,int,int,
                   int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int> Format;
 
+#define dPhi12_0 13
+#define dPhi12_1 14
+#define dPhi23_0 19
+#define dPhi23_1 20
+#define dPhi34_0 23
+#define dPhi34_1 24
+#define dPhi13_0 15
+#define dPhi13_1 16
+#define dPhi14_0 17
+#define dPhi14_1 18
+#define dPhi24_0 21
+#define dPhi24_1 22
+#define muPtGen  1
+
     DataFrame df;
     Format tmp;
-    for(unsigned int row=0; /*row<100 &&*/ read_tuple(input,tmp); row++)
-        df.rbind( DataRow(tmp) );
+    for(unsigned int row=0; /*row<100 &&*/ read_tuple(input,tmp); row++){
+        if( get<11>(tmp) == 15 ){
+            tuple<int,int,int,int,int,int,float> dPhis = make_tuple(
+                get<dPhi12_0>(tmp), get<dPhi23_0>(tmp), get<dPhi34_0>(tmp),
+                get<dPhi13_0>(tmp), get<dPhi14_0>(tmp), get<dPhi24_0>(tmp),
+                get<muPtGen>(tmp)
+            );
+            df.rbind( DataRow(dPhis) );
+        }
+        if( get<12>(tmp) == 15 ){
+            tuple<int,int,int,int,int,int,float> dPhis = make_tuple(
+                get<dPhi12_1>(tmp), get<dPhi23_1>(tmp), get<dPhi34_1>(tmp),
+                get<dPhi13_1>(tmp), get<dPhi14_1>(tmp), get<dPhi24_1>(tmp),
+                get<muPtGen>(tmp)
+            );
+            df.rbind( DataRow(dPhis) );
+        }
+    }
 
     RandomForest rf;
 
-    rf.train(df,1);
+    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+
+    rf.train(df,predictorsIdx,6);
 
 //    fr.trees();
 
