@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <tuple>
 #include <list>
 #include <vector>
@@ -137,7 +138,7 @@ public:
         return true;
     }
 
-    bool rbind(const DataRow &row) {
+    bool rbind(DataRow && row) {
         // check if number of elements in the row agrees with the expectation
         if( row.data.size() != schema.size() && schema.size() > 0 )
             return false;
@@ -158,7 +159,7 @@ public:
                  )
             ) return false;
         }
-        rows.push_back(row);
+        rows.push_back( move(row) );
         return true;
     }
 
@@ -251,7 +252,7 @@ public:
         vector<unsigned int> retval(nTotal);
         if( !replace ){
             unsigned int i=0;
-            generate_n(retval.begin(), nTotal, [i](void) mutable { return ++i; });
+            generate_n(retval.begin(), nTotal, [i](void) mutable { return i++; });
             shuffle(retval.begin(),retval.end(),rState);
         } else {
             default_random_engine dre(rState);
@@ -300,6 +301,8 @@ public:
             double sdTarget = sqrt((varTarget - meanTarget*meanTarget/size)/(size - 1));
             meanTarget /= size;
 
+cout << "sdTarget= " << sdTarget << " meanTarget= " << meanTarget << endl;
+
             struct HashPair { size_t operator()(const pair<unsigned int,unsigned int>& p) const { return p.first*10 + p.second; } };
             unordered_map<pair<unsigned int,unsigned int>, double, HashPair> corr;
             for(pair<unsigned int,unsigned int> pick : splits){
@@ -328,6 +331,9 @@ public:
                                 return a.second < b.second;
                             }
                 );
+
+cout << " Best Cut! " << endl;
+cout << bestCut->first.first << " " << bestCut->first.second << " cor = " << bestCut->second << endl;
 
             Splits remainingSplits;
             copy_if( splits.cbegin(),
@@ -413,7 +419,10 @@ public:
         const int nTrees = 40;
         for(unsigned int t=0; t<nTrees; t++){
             Splits splits( generateRandomSplits( df.getSchema(), (unsigned int)sqrt(df.ncol()) ) );
-            Tree tree = pickStrongestCuts(df,targetIdx,splits,sample(df.nrow(),df.nrow()*0.5));
+
+for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+
+            Tree tree = pickStrongestCuts(df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
         }
         
@@ -448,41 +457,58 @@ DataFrame oneHOTencode(const vector<int> &col, unordered_set<int> levels = {}, b
     return df;
 }
 
+template<int IDX, int NMAX, typename... Args>
+struct READ_TUPLE {
+    static bool read(istream &in, tuple<Args...> &t){
+        if( in.eof() ) return false;
+        in >> get<IDX>(t);
+        return READ_TUPLE<IDX+1,NMAX,Args...>::read(in,t);
+    }
+};
+template<int NMAX, typename... Args>
+struct READ_TUPLE<NMAX,NMAX,Args...>{
+    static bool read(istream &in, tuple<Args...> &t){ return true; }
+};
+template <typename... Args>
+
+bool read_tuple(istream &in, tuple<Args...> &t) noexcept {
+    return READ_TUPLE<0,sizeof...(Args),Args...>::read(in,t);
+}
+
 int main(void){
-    // A categorical (potentially ordered) predictor type
-    enum class cat1 : char { type1, type2, type3 };
+    ifstream input("../trigger/pt/SingleMu_Pt1To1000_FlatRandomOneOverPt.csv");
 
-    vector< tuple<cat1,float> > predictors = {
-        make_tuple(cat1::type1,1.0),
-        make_tuple(cat1::type2,2.0),
-        make_tuple(cat1::type3,3.0)
+    struct field_reader: std::ctype<char> {
+        field_reader(): std::ctype<char>(get_table()) {}
+
+        static std::ctype_base::mask const* get_table() {
+            static std::vector<std::ctype_base::mask> 
+                rc(table_size, std::ctype_base::mask());
+
+            rc['\n'] = std::ctype_base::space;
+            rc[':']  = std::ctype_base::space;
+            rc[',']  = std::ctype_base::space;
+            return &rc[0];
+        }
     };
 
-    vector< tuple<int> > targets = {
-        make_tuple(1),
-        make_tuple(2),
-        make_tuple(3)
-    };
+    input.imbue(std::locale(std::locale(), new field_reader()));
 
-//    DataRow row(predictors[1]);
+    copy_n(istream_iterator<string>(input), 53, ostream_iterator<string>(cout," "));
+    cout << endl;
 
-//    DataFrame (predictors,targets)
-    DataRow row( make_tuple(1.1,1,true) );
-    cout << row << endl;
+    typedef tuple<int,float,float,float,int,float,float,float,float,float,float,int,int,int,int,int,int,int,int,int,int,int,int,int,int,
+                  int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int> Format;
 
-    vector<int> col = {1,2,3,4};
-//    DataFrame df;
-//    df.cbind(col);
-//    cout << df << endl;
-
-    cout << oneHOTencode(col) << endl;
+    DataFrame df;
+    Format tmp;
+    for(unsigned int row=0; /*row<100 &&*/ read_tuple(input,tmp); row++)
+        df.rbind( DataRow(tmp) );
 
     RandomForest rf;
-    vector<unsigned int> s = rf.sample(10,5);
-    copy(s.begin(), s.end(), ostream_iterator<unsigned int>(cout," "));
-    cout<<endl;
 
-//    rf.train(predictors,targets,lossFunction);
+    rf.train(df,1);
+
 //    fr.trees();
 
     return 0;
