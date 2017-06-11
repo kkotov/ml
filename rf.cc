@@ -275,18 +275,17 @@ public:
 
         // end of recursion
         if( splits.empty() ){
-/*            double sum = accumulate(next(subset.begin()),
-                                    subset.end(),
-                                    subset[0],
-                                    [&df, &targetIdx](int i, int j){
-                                        return df[i][targetIdx].asFloating + df[j][targetIdx].asFloating;
-                                    }
-                         );
-*/
-            double sum = 0;
-            for(unsigned int i=0; i<subset.size(); i++) sum += df[ subset[i] ][6].asFloating;
+            double median_cut = 0;
+            if( df.getSchema()[targetIdx] == 1 ){
+                unsigned int size = subset.size();
+                vector<double> vals(size);
+                for(unsigned int i=0; i<size; ++i)
+                    vals[i] = df[subset[i]][targetIdx].asFloating;
+                nth_element(vals.begin(), vals.begin() + size/2, vals.end());
+                median_cut = vals[size/2];
+            }
             Tree leaf;
-            leaf.nodes.push_back( Tree::Node( sum/subset.size() ) );
+            leaf.nodes.push_back( Tree::Node( median_cut ) ); //sum/subset.size() ) );
             return leaf;
         }
 
@@ -417,10 +416,8 @@ public:
 public:
     double regress(const DataRow& row) const {
         double sum = 0.;
-        for(const auto &tree : ensemble){
-            cout << tree.predict(row) << endl;
+        for(const auto &tree : ensemble)
             sum += tree.predict(row).asFloating;
-        }
         return sum/ensemble.size();
     }
 
@@ -433,10 +430,8 @@ public:
         for(unsigned int t=0; t<nTrees; t++){
             Splits splits( generateRandomSplits( df.getSchema(), predictorsIdx, (unsigned int)sqrt(predictorsIdx.size()) ) );
             //for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
             Tree tree = pickStrongestCuts(df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
-
-    std::cout << "predict = " << tree.predict( df[10] ) << " true = " << df[10][6] << std::endl;
-
             ensemble.push_back( move(tree) );
         }
         
@@ -580,7 +575,17 @@ int main(void){
 
     rf.train(df,predictorsIdx,6);
 
-    std::cout << "predict = " << rf.regress( df[10] ) << " true = " << df[10][6] << std::endl;
+    double bias = 0, var = 0;
+    long cnt = 0;
+    for(unsigned int row = 0; row < df.nrow(); row++,cnt++){
+//        std::cout << "predict = " << rf.regress( df[10] ) << " true = " << df[10][6] << std::endl;
+        double prediction = rf.regress( df[row] );
+        bias +=  prediction - df[row][6].asFloating;
+        var  += (prediction - df[row][6].asFloating) * (prediction - df[row][6].asFloating);
+    }
+    double sd = sqrt((var - bias*bias/cnt)/(cnt - 1));
+    bias /= cnt;
+    cout << "bias = "<< bias << " sd = " << sd << endl;
 
     return 0;
 }
