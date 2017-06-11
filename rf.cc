@@ -332,6 +332,8 @@ public:
                             }
                 );
 
+//cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
+
             Splits remainingSplits;
             copy_if( splits.cbegin(),
                      splits.cend(),
@@ -429,7 +431,7 @@ public:
         const int nTrees = 40;
         for(unsigned int t=0; t<nTrees; t++){
             Splits splits( generateRandomSplits( df.getSchema(), predictorsIdx, (unsigned int)sqrt(predictorsIdx.size()) ) );
-            //for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
             Tree tree = pickStrongestCuts(df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
@@ -545,18 +547,18 @@ int main(void){
     Format tmp;
     for(unsigned int row=0; /*row<100 &&*/ read_tuple(input,tmp); row++){
         if( get<11>(tmp) == 15 ){
-            tuple<int,int,int,int,int,int,float> dPhis = make_tuple(
+            tuple<float,float,float,float,float,float,float> dPhis = make_tuple(
                 get<dPhi12_0>(tmp), get<dPhi23_0>(tmp), get<dPhi34_0>(tmp),
                 get<dPhi13_0>(tmp), get<dPhi14_0>(tmp), get<dPhi24_0>(tmp),
-                get<muPtGen>(tmp)
+                1./get<muPtGen>(tmp)
             );
             df.rbind( DataRow(dPhis) );
         }
         if( get<12>(tmp) == 15 ){
-            tuple<int,int,int,int,int,int,float> dPhis = make_tuple(
+            tuple<float,float,float,float,float,float,float> dPhis = make_tuple(
                 get<dPhi12_1>(tmp), get<dPhi23_1>(tmp), get<dPhi34_1>(tmp),
                 get<dPhi13_1>(tmp), get<dPhi14_1>(tmp), get<dPhi24_1>(tmp),
-                get<muPtGen>(tmp)
+                1./get<muPtGen>(tmp)
             );
             df.rbind( DataRow(dPhis) );
         }
@@ -567,7 +569,6 @@ int main(void){
         sum += df[i][6].asFloating;
 //        cout << "pT = " << df[i][6].asFloating << endl;
     }
-    cout << "Average = " << sum/df.nrow() << endl;
 
     RandomForest rf;
 
@@ -578,10 +579,11 @@ int main(void){
     double bias = 0, var = 0;
     long cnt = 0;
     for(unsigned int row = 0; row < df.nrow(); row++,cnt++){
-//        std::cout << "predict = " << rf.regress( df[10] ) << " true = " << df[10][6] << std::endl;
-        double prediction = rf.regress( df[row] );
-        bias +=  prediction - df[row][6].asFloating;
-        var  += (prediction - df[row][6].asFloating) * (prediction - df[row][6].asFloating);
+        double prediction = 1./rf.regress( df[row] );
+        double truth      = 1./df[row][6].asFloating;
+// std::cout << "predict = " << prediction  << " true = " << truth << std::endl;
+        bias +=  prediction - truth;
+        var  += (prediction - truth) * (prediction - truth);
     }
     double sd = sqrt((var - bias*bias/cnt)/(cnt - 1));
     bias /= cnt;
