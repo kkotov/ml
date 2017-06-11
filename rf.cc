@@ -107,8 +107,8 @@ private:
 
 public:
     const vector<unsigned int>& getSchema(void) const { return schema; }
-    int nrow(void) const { return rows.size(); }
-    int ncol(void) const { return schema.size(); }
+    unsigned int nrow(void) const { return rows.size(); }
+    unsigned int ncol(void) const { return schema.size(); }
 
     template<typename T>
     bool cbind(const vector<T> &col, unsigned int nLevels=1) {
@@ -275,13 +275,16 @@ public:
 
         // end of recursion
         if( splits.empty() ){
-            double sum = accumulate(next(subset.begin()),
+/*            double sum = accumulate(next(subset.begin()),
                                     subset.end(),
                                     subset[0],
                                     [&df, &targetIdx](int i, int j){
                                         return df[i][targetIdx].asFloating + df[j][targetIdx].asFloating;
                                     }
                          );
+*/
+            double sum = 0;
+            for(unsigned int i=0; i<subset.size(); i++) sum += df[ subset[i] ][6].asFloating;
             Tree leaf;
             leaf.nodes.push_back( Tree::Node( sum/subset.size() ) );
             return leaf;
@@ -375,6 +378,13 @@ public:
             // copy the local root node
             Tree::Node& local_root = tree.nodes[0];
             local_root.position = bestCut->first.first;
+            if( df.getSchema()[bestCut->first.first] == 1 ){
+                local_root.value.type = Variable::Continuous;
+                local_root.value.asFloating = median_cut;
+            } else {
+                local_root.value.type = Variable::Categorical;
+                local_root.value.asIntegral = bestCut->first.second;
+            }
             local_root.left_child = (left_subtree.nodes.size()?1:0); // left subtree (if exists) is placed right after the root -> index=1
             transform(left_subtree.nodes.cbegin(), // source from
                       left_subtree.nodes.cend(),   // source till
@@ -405,7 +415,15 @@ public:
     vector<Tree> ensemble;
 
 public:
-    double regress(const DataRow& row) const { return 0; }
+    double regress(const DataRow& row) const {
+        double sum = 0.;
+        for(const auto &tree : ensemble){
+            cout << tree.predict(row) << endl;
+            sum += tree.predict(row).asFloating;
+        }
+        return sum/ensemble.size();
+    }
+
     int   classify(const DataRow& row) const { return 0; }
 
     void train(const DataFrame& df, const vector<unsigned int>& predictorsIdx, unsigned int targetIdx) {
@@ -416,6 +434,9 @@ public:
             Splits splits( generateRandomSplits( df.getSchema(), predictorsIdx, (unsigned int)sqrt(predictorsIdx.size()) ) );
             //for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
             Tree tree = pickStrongestCuts(df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
+
+    std::cout << "predict = " << tree.predict( df[10] ) << " true = " << df[10][6] << std::endl;
+
             ensemble.push_back( move(tree) );
         }
         
@@ -546,13 +567,20 @@ int main(void){
         }
     }
 
+    double sum = 0;
+    for(unsigned int i=0; i<df.nrow(); i++){
+        sum += df[i][6].asFloating;
+//        cout << "pT = " << df[i][6].asFloating << endl;
+    }
+    cout << "Average = " << sum/df.nrow() << endl;
+
     RandomForest rf;
 
     vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
 
     rf.train(df,predictorsIdx,6);
 
-//    fr.trees();
+    std::cout << "predict = " << rf.regress( df[10] ) << " true = " << df[10][6] << std::endl;
 
     return 0;
 }
