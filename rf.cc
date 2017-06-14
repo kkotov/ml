@@ -221,7 +221,19 @@ public:
         return traverse(row,nodes[0]);
     }
 
-//    load/save
+    bool load(istream &input){
+        return true;
+    }
+    bool save(ostream &output){
+        for(unsigned int n=0; n<nodes.size(); n++)
+            output << n
+                   << "," << nodes[n].value
+                   << "," << nodes[n].position
+                   << "," << nodes[n].left_child
+                   << "," << nodes[n].right_child
+                   << endl;
+        return true;
+    }
 };
 
 class RandomForest {
@@ -264,11 +276,11 @@ public:
 
     // simplest forward-stepwise
     Tree pickStrongestCuts(const DataFrame& df,
-                           unsigned int targetIdx,
+                           unsigned int responseIdx,
                            const Splits& splits,
                            const vector<unsigned int>& subset = {}
     ){
-        // LDA for categorical target?
+        // LDA for categorical response?
         // other metrics: purity/gini/entrophy/rms
 
         if( subset.size() == 0 ) return Tree();
@@ -276,11 +288,11 @@ public:
         // end of recursion
         if( splits.empty() ){
             double median_cut = 0;
-            if( df.getSchema()[targetIdx] == 1 ){
+            if( df.getSchema()[responseIdx] == 1 ){
                 unsigned int size = subset.size();
                 vector<double> vals(size);
                 for(unsigned int i=0; i<size; ++i)
-                    vals[i] = df[subset[i]][targetIdx].asFloating;
+                    vals[i] = df[subset[i]][responseIdx].asFloating;
                 nth_element(vals.begin(), vals.begin() + size/2, vals.end());
                 median_cut = vals[size/2];
             }
@@ -289,16 +301,16 @@ public:
             return leaf;
         }
 
-        // for continuous target simply calculate correlations and pick the strongest; ignore the outliers?
-//        if( df[0][targetIdx].type == Variable::Continuous ){
+        // for continuous response simply calculate correlations and pick the strongest; ignore the outliers?
+//        if( df[0][responseIdx].type == Variable::Continuous ){
             // from https://github.com/koskot77/clustcorr/blob/master/src/utilities.cc
             unsigned int size = subset.size();
 
             double varTarget = 0, meanTarget = 0;
             for(unsigned int i=0; i<size; ++i){
                 unsigned int row = subset[i];
-                varTarget  += df[row][targetIdx].asFloating * df[row][targetIdx].asFloating;
-                meanTarget += df[row][targetIdx].asFloating;
+                varTarget  += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+                meanTarget += df[row][responseIdx].asFloating;
             }
             double sdTarget = sqrt((varTarget - meanTarget*meanTarget/size)/(size - 1));
             meanTarget /= size;
@@ -312,11 +324,11 @@ public:
                     if( df.getSchema()[ pick.first ] == 1 ){
                         mean     += df[row][pick.first].asFloating;
                         var      += df[row][pick.first].asFloating * df[row][pick.first].asFloating;
-                        crossVar += df[row][pick.first].asFloating * df[row][targetIdx].asFloating;
+                        crossVar += df[row][pick.first].asFloating * df[row][responseIdx].asFloating;
                     } else {
                         mean     += (df[row][pick.first].asIntegral == pick.second);
                         var      += (df[row][pick.first].asIntegral == pick.second);
-                        crossVar += (df[row][pick.first].asIntegral == pick.second) * df[row][targetIdx].asFloating;
+                        crossVar += (df[row][pick.first].asIntegral == pick.second) * df[row][responseIdx].asFloating;
                     }
                 }
                 double sd = sqrt((var - mean*mean/size)/(size - 1));
@@ -332,7 +344,7 @@ public:
                             }
                 );
 
-//cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
+cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
 
             Splits remainingSplits;
             copy_if( splits.cbegin(),
@@ -371,8 +383,8 @@ public:
                 }
 
             // good place to use the thread pool
-            Tree left_subtree  = pickStrongestCuts(df, targetIdx, remainingSplits, left_subset);
-            Tree right_subtree = pickStrongestCuts(df, targetIdx, remainingSplits, right_subset);
+            Tree left_subtree  = pickStrongestCuts(df, responseIdx, remainingSplits, left_subset);
+            Tree right_subtree = pickStrongestCuts(df, responseIdx, remainingSplits, right_subset);
 
             Tree tree;
             tree.nodes.resize(1 + left_subtree.nodes.size() + right_subtree.nodes.size());
@@ -425,15 +437,15 @@ public:
 
     int   classify(const DataRow& row) const { return 0; }
 
-    void train(const DataFrame& df, const vector<unsigned int>& predictorsIdx, unsigned int targetIdx) {
+    void train(const DataFrame& df, const vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
         if( df.nrow() < 1 ) return ;
         rState.seed(0);
-        const int nTrees = 40;
+        const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
             Splits splits( generateRandomSplits( df.getSchema(), predictorsIdx, (unsigned int)sqrt(predictorsIdx.size()) ) );
-//for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
-//            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
-            Tree tree = pickStrongestCuts(df, targetIdx, splits, sample(df.nrow(),df.nrow()*0.5));
+for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, splits, sample(df.nrow(),df.nrow()*0.5));
+            Tree tree = pickStrongestCuts(df, responseIdx, splits, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
         }
         
@@ -487,7 +499,11 @@ bool read_tuple(istream &in, tuple<Args...> &t) noexcept {
 }
 
 int main(void){
-    ifstream input("../trigger/pt/SingleMu_Pt1To1000_FlatRandomOneOverPt.csv");
+    // require(MASS)
+    // xy <- mvrnorm( 1000000, c(1,2), matrix(c(3,2,2,4),ncol=2) )
+    // plot(xy[sample(nrow(xy),10000),], xlab="x", ylab="y", pch=1)
+    // write.csv(file="one.csv",x=xy[sample(nrow(xy),10000),])
+    ifstream input("one.csv");
 
     struct field_reader: std::ctype<char> {
         field_reader(): std::ctype<char>(get_table()) {}
@@ -521,67 +537,31 @@ int main(void){
             my_dict_output_iterator& operator++ (void){ return *this; }
             my_dict_output_iterator& operator++ (int) { return *this; }
     };
-    copy_n(istream_iterator<string>(input), 53, my_dict_output_iterator(dict));
+    copy_n(istream_iterator<string>(input), 3, my_dict_output_iterator(dict));
 
-//    for(auto d : dict) cout << d.first << " - " << d.second << endl;
-//    cout << endl;
-
-    typedef tuple<int,float,float,float,int,float,float,float,float,float,float,int,int,int,int,int,int,int,int,int,int,int,int,int,int,
-                  int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int> Format;
-
-#define dPhi12_0 13
-#define dPhi12_1 14
-#define dPhi23_0 19
-#define dPhi23_1 20
-#define dPhi34_0 23
-#define dPhi34_1 24
-#define dPhi13_0 15
-#define dPhi13_1 16
-#define dPhi14_0 17
-#define dPhi14_1 18
-#define dPhi24_0 21
-#define dPhi24_1 22
-#define muPtGen  1
-
+    typedef tuple<string,float,float> Format;
     DataFrame df;
     Format tmp;
-    for(unsigned int row=0; /*row<100 &&*/ read_tuple(input,tmp); row++){
-        if( get<11>(tmp) == 15 ){
-            tuple<float,float,float,float,float,float,float> dPhis = make_tuple(
-                get<dPhi12_0>(tmp), get<dPhi23_0>(tmp), get<dPhi34_0>(tmp),
-                get<dPhi13_0>(tmp), get<dPhi14_0>(tmp), get<dPhi24_0>(tmp),
-                1./get<muPtGen>(tmp)
-            );
-            df.rbind( DataRow(dPhis) );
-        }
-        if( get<12>(tmp) == 15 ){
-            tuple<float,float,float,float,float,float,float> dPhis = make_tuple(
-                get<dPhi12_1>(tmp), get<dPhi23_1>(tmp), get<dPhi34_1>(tmp),
-                get<dPhi13_1>(tmp), get<dPhi14_1>(tmp), get<dPhi24_1>(tmp),
-                1./get<muPtGen>(tmp)
-            );
-            df.rbind( DataRow(dPhis) );
-        }
-    }
-
-    double sum = 0;
-    for(unsigned int i=0; i<df.nrow(); i++){
-        sum += df[i][6].asFloating;
-//        cout << "pT = " << df[i][6].asFloating << endl;
+    for(unsigned int row=0; read_tuple(input,tmp); row++){
+        tuple<float,float> r12 = make_tuple(
+                get<1>(tmp), get<2>(tmp)
+        );
+        df.rbind( DataRow(r12) );
     }
 
     RandomForest rf;
 
-    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+    vector<unsigned int> predictorsIdx = {0};
 
-    rf.train(df,predictorsIdx,6);
+    rf.train(df,predictorsIdx,1);
+
+    rf.ensemble[0].save(cout);
 
     double bias = 0, var = 0;
     long cnt = 0;
     for(unsigned int row = 0; row < df.nrow(); row++,cnt++){
-        double prediction = 1./rf.regress( df[row] );
-        double truth      = 1./df[row][6].asFloating;
-// std::cout << "predict = " << prediction  << " true = " << truth << std::endl;
+        double prediction = rf.regress( df[row] );
+        double truth      = df[row][1].asFloating;
         bias +=  prediction - truth;
         var  += (prediction - truth) * (prediction - truth);
     }
