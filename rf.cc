@@ -197,7 +197,7 @@ public:
             return root.value;
 
         if( root.value.type == Variable::Continuous ){
-            if( root.value.asFloating < row[root.position].asFloating )
+            if( root.value.asFloating > row[root.position].asFloating )
                 return traverse(row,nodes[root.left_child]);
             else
                 return traverse(row,nodes[root.right_child]);
@@ -343,7 +343,7 @@ public:
                             }
                 );
 
-cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
+//cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
 
             SplitVars remainingSplitVars;
             bool once = false;
@@ -447,7 +447,7 @@ public:
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
-for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
@@ -559,7 +559,7 @@ int main(void){
 
     rf.train(df,predictorsIdx,1);
 
-    rf.ensemble[0].save(cout);
+//    rf.ensemble[0].save(cout);
 
     double bias = 0, var = 0;
     long cnt = 0;
