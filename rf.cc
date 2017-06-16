@@ -11,7 +11,7 @@
 #include <unordered_map>
 using namespace std;
 
-// g++ -Wall -std=c++11 -o rf rf.cc
+// g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf rf.cc -lpthread
 
 // No better solution for the type-obsessed languages but to create a type
 //  that can play for the both sides
@@ -239,16 +239,15 @@ public:
 class RandomForest {
 private:
 public:
-    // note, number of splits the is not always mtry-sized!
-    typedef list<pair<unsigned int,unsigned int>> Splits; // variable index, level (if categorical)
+    typedef list<pair<unsigned int,unsigned int>> SplitVars; // variable index, level (if categorical)
 
     std::default_random_engine rState;
 
-    Splits generateRandomSplits(const vector<unsigned int> &schema, const vector<unsigned int>& predictorsIdx, unsigned int mtry){
-        Splits splits;
+    SplitVars generateRandomSplitVars(const vector<unsigned int> &schema, const vector<unsigned int>& predictorsIdx, unsigned int mtry){
+        SplitVars vars;
         default_random_engine dre(rState);
         uniform_int_distribution<unsigned int> uid(0, predictorsIdx.size()-1), uid_l;
-        generate_n( back_inserter(splits),
+        generate_n( back_inserter(vars),
                     mtry,
                     [&uid,&uid_l,&dre,&schema,&predictorsIdx](void){
                         unsigned int idx = predictorsIdx[ uid(dre) ];
@@ -256,7 +255,7 @@ public:
                         return pair<unsigned int,unsigned int>(idx,level);
                     }
         );
-        return splits;
+        return vars;
     }
 
     vector<unsigned int> sample(unsigned int nTotal, unsigned int nSampled, bool replace = false){
@@ -275,10 +274,10 @@ public:
     }
 
     // simplest forward-stepwise
-    Tree pickStrongestCuts(const DataFrame& df,
-                           unsigned int responseIdx,
-                           const Splits& splits,
-                           const vector<unsigned int>& subset = {}
+    Tree findBestSplits(const DataFrame& df,
+                        unsigned int responseIdx,
+                        const SplitVars& vars,
+                        const vector<unsigned int>& subset = {}
     ){
         // LDA for categorical response?
         // other metrics: purity/gini/entrophy/rms
@@ -286,7 +285,7 @@ public:
         if( subset.size() == 0 ) return Tree();
 
         // end of recursion
-        if( splits.empty() ){
+        if( vars.empty() ){
             double median_cut = 0;
             if( df.getSchema()[responseIdx] == 1 ){
                 unsigned int size = subset.size();
@@ -317,7 +316,7 @@ public:
 
             struct HashPair { size_t operator()(const pair<unsigned int,unsigned int>& p) const { return p.first*10 + p.second; } };
             unordered_map<pair<unsigned int,unsigned int>, double, HashPair> corr;
-            for(pair<unsigned int,unsigned int> pick : splits){
+            for(pair<unsigned int,unsigned int> pick : vars){
                 double var, crossVar, mean;
                 for(unsigned int i=0; i<size; ++i){
                     unsigned int row = subset[i];
@@ -346,15 +345,20 @@ public:
 
 cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
 
-            Splits remainingSplits;
-            copy_if( splits.cbegin(),
-                     splits.cend(),
-                     back_inserter(remainingSplits),
-                     [&bestCut](pair<unsigned int,unsigned int> s){
-                         // can recycle remaining levels
-                         return s.first != bestCut->first.first || s.second != bestCut->first.second;
+            SplitVars remainingSplitVars;
+            bool once = false;
+            copy_if( vars.cbegin(),
+                     vars.cend(),
+                     back_inserter(remainingSplitVars),
+                     [&bestCut,&once](pair<unsigned int,unsigned int> s){
+                         if( !once ){
+                             once = true;
+                             return s.first != bestCut->first.first || s.second != bestCut->first.second;
+                         } else
+                             return true;
                      }
             );
+
             vector<unsigned int> left_subset, right_subset;
             double median_cut = 0;
             if( df.getSchema()[bestCut->first.first] == 1 ){
@@ -383,8 +387,8 @@ cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second <<
                 }
 
             // good place to use the thread pool
-            Tree left_subtree  = pickStrongestCuts(df, responseIdx, remainingSplits, left_subset);
-            Tree right_subtree = pickStrongestCuts(df, responseIdx, remainingSplits, right_subset);
+            Tree left_subtree  = findBestSplits(df, responseIdx, remainingSplitVars, left_subset);
+            Tree right_subtree = findBestSplits(df, responseIdx, remainingSplitVars, right_subset);
 
             Tree tree;
             tree.nodes.resize(1 + left_subtree.nodes.size() + right_subtree.nodes.size());
@@ -442,10 +446,10 @@ public:
         rState.seed(0);
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
-            Splits splits( generateRandomSplits( df.getSchema(), predictorsIdx, (unsigned int)sqrt(predictorsIdx.size()) ) );
-for(auto s : splits) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
-//            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, splits, sample(df.nrow(),df.nrow()*0.5));
-            Tree tree = pickStrongestCuts(df, responseIdx, splits, sample(df.nrow(),df.nrow()*0.5));
+            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
+for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
+            Tree tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
         }
         
