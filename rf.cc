@@ -319,7 +319,7 @@ public:
             struct HashPair { size_t operator()(const pair<unsigned int,unsigned int>& p) const { return p.first*10 + p.second; } };
             unordered_map<pair<unsigned int,unsigned int>, double, HashPair> corr;
             for(pair<unsigned int,unsigned int> pick : vars){
-                double var, crossVar, mean;
+                double var = 0, crossVar = 0, mean = 0;
                 for(unsigned int i=0; i<size; ++i){
                     unsigned int row = subset[i];
                     if( df.getSchema()[ pick.first ] == 1 ){
@@ -334,8 +334,9 @@ public:
                 }
                 double sd = sqrt((var - mean*mean/size)/(size - 1));
                 mean /= size;
-                corr[pick] = size/double(size-1) * (crossVar/size-meanTarget*mean) / sdTarget / sd ;
+                corr[pick] = (sd>0 ? size/double(size-1) * (crossVar/size-meanTarget*mean) / sdTarget / sd : 0);
             }
+
             unordered_map<pair<unsigned int,unsigned int>, double, HashPair>::const_iterator bestCut = 
                 max_element(corr.cbegin(),
                             corr.cend(),
@@ -449,7 +450,7 @@ public:
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
-for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
@@ -584,17 +585,17 @@ DataFrame read2(void){
     Format tmp;
     for(unsigned int row=0; read_tuple(input,tmp); row++){
         if( get<11>(tmp) == 15 ){
-            tuple<float,float/*,float,float,float,float,float*/> dPhis = make_tuple(
-                abs(get<dPhi12_0>(tmp)),// get<dPhi23_0>(tmp), get<dPhi34_0>(tmp),
-//                get<dPhi13_0>(tmp), get<dPhi14_0>(tmp), get<dPhi24_0>(tmp),
+            tuple<float,float,float,float,float,float,float> dPhis = make_tuple(
+                abs(get<dPhi12_0>(tmp)), abs(get<dPhi23_0>(tmp)), abs(get<dPhi34_0>(tmp)),
+                abs(get<dPhi13_0>(tmp)), abs(get<dPhi14_0>(tmp)), abs(get<dPhi24_0>(tmp)),
                 1./get<muPtGen>(tmp)
             );
             df.rbind( DataRow(dPhis) );
         }
         if( get<12>(tmp) == 15 ){
-            tuple<float,float/*,float,float,float,float,float*/> dPhis = make_tuple(
-                abs(get<dPhi12_1>(tmp)), //get<dPhi23_1>(tmp), get<dPhi34_1>(tmp),
-//                get<dPhi13_1>(tmp), get<dPhi14_1>(tmp), get<dPhi24_1>(tmp),
+            tuple<float,float,float,float,float,float,float> dPhis = make_tuple(
+                abs(get<dPhi12_1>(tmp)), abs(get<dPhi23_1>(tmp)), abs(get<dPhi34_1>(tmp)),
+                abs(get<dPhi13_1>(tmp)), abs(get<dPhi14_1>(tmp)), abs(get<dPhi24_1>(tmp)),
                 1./get<muPtGen>(tmp)
             );
             df.rbind( DataRow(dPhis) );
@@ -608,20 +609,20 @@ int main(void){
     RandomForest rf;
 
     DataFrame df( read2() );
-//    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
-//    rf.train(df,predictorsIdx,6);
+    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+    rf.train(df,predictorsIdx,6);
 
 //    DataFrame df( read1() );
-    vector<unsigned int> predictorsIdx = {0};
-    rf.train(df,predictorsIdx,1);
+//    vector<unsigned int> predictorsIdx = {0,1};
+//    rf.train(df,predictorsIdx,2);
 
-    rf.ensemble[0].save(cout);
+//    rf.ensemble[0].save(cout);
 
     double bias = 0, var = 0;
     long cnt = 0;
     for(unsigned int row = 0; row>=0 && row < df.nrow(); row++,cnt++){
         double prediction = rf.regress( df[row] );
-        double truth      = df[row][1].asFloating;
+        double truth      = df[row][6].asFloating;
 // cout << df[row] <<endl;
 //        cout << "prediction = "<<prediction <<" truth= "<<truth<<endl;
 //        double prediction = 1./rf.regress( df[row] );
