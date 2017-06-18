@@ -193,7 +193,7 @@ private:
 public:
     Variable traverse(const DataRow& row, const Node& root) const {
         // is it a leaf/terminal_node?
-        if( root.left_child == 0 || root.right_child == 0 )
+        if( root.left_child == 0 && root.right_child == 0 )
             return root.value;
 
         if( root.value.type == Variable::Continuous ){
@@ -286,12 +286,14 @@ public:
 
         // end of recursion
         if( vars.empty() ){
-            double median_cut = 0;
+            double median_cut = 0, sum = 0;
             if( df.getSchema()[responseIdx] == 1 ){
                 unsigned int size = subset.size();
                 vector<double> vals(size);
-                for(unsigned int i=0; i<size; ++i)
+                for(unsigned int i=0; i<size; ++i){
                     vals[i] = df[subset[i]][responseIdx].asFloating;
+                    sum += vals[i];
+                }
                 nth_element(vals.begin(), vals.begin() + size/2, vals.end());
                 median_cut = vals[size/2];
             }
@@ -334,7 +336,6 @@ public:
                 mean /= size;
                 corr[pick] = size/double(size-1) * (crossVar/size-meanTarget*mean) / sdTarget / sd ;
             }
-
             unordered_map<pair<unsigned int,unsigned int>, double, HashPair>::const_iterator bestCut = 
                 max_element(corr.cbegin(),
                             corr.cend(),
@@ -343,7 +344,7 @@ public:
                             }
                 );
 
-//cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << endl;
+//cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << " vars.size() " << vars.size() << endl;
 
             SplitVars remainingSplitVars;
             bool once = false;
@@ -352,8 +353,9 @@ public:
                      back_inserter(remainingSplitVars),
                      [&bestCut,&once](pair<unsigned int,unsigned int> s){
                          if( !once ){
-                             once = true;
-                             return s.first != bestCut->first.first || s.second != bestCut->first.second;
+                             bool match = s.first != bestCut->first.first || s.second != bestCut->first.second;
+                             if( !match ) once = true;
+                             return match;
                          } else
                              return true;
                      }
@@ -447,7 +449,7 @@ public:
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
-//for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             ensemble.push_back( move(tree) );
@@ -502,13 +504,7 @@ bool read_tuple(istream &in, tuple<Args...> &t) noexcept {
     return READ_TUPLE<0,sizeof...(Args),Args...>::read(in,t);
 }
 
-int main(void){
-    // require(MASS)
-    // xy <- mvrnorm( 1000000, c(1,2), matrix(c(3,2,2,4),ncol=2) )
-    // plot(xy[sample(nrow(xy),10000),], xlab="x", ylab="y", pch=1)
-    // write.csv(file="one.csv",x=xy[sample(nrow(xy),10000),])
-    ifstream input("one.csv");
-
+void setSeparators(istream& input){
     struct field_reader: std::ctype<char> {
         field_reader(): std::ctype<char>(get_table()) {}
 
@@ -522,9 +518,10 @@ int main(void){
             return &rc[0];
         }
     };
-
     input.imbue(std::locale(std::locale(), new field_reader()));
+}
 
+void readHeader(istream& input, unsigned int ncol){
     unordered_map<string,unsigned int> dict;
     class my_dict_output_iterator : public iterator<output_iterator_tag,typename unordered_map<string,unsigned int>::value_type> {
         private:
@@ -541,8 +538,17 @@ int main(void){
             my_dict_output_iterator& operator++ (void){ return *this; }
             my_dict_output_iterator& operator++ (int) { return *this; }
     };
-    copy_n(istream_iterator<string>(input), 3, my_dict_output_iterator(dict));
+    copy_n(istream_iterator<string>(input), ncol, my_dict_output_iterator(dict));
+}
 
+DataFrame read1(void){
+    // require(MASS)
+    // xy <- mvrnorm( 1000000, c(1,2), matrix(c(3,2,2,4),ncol=2) )
+    // plot(xy[sample(nrow(xy),10000),], xlab="x", ylab="y", pch=1)
+    // write.csv(file="one.csv",x=xy[sample(nrow(xy),10000),])
+    ifstream input("one.csv");
+    setSeparators(input);
+    readHeader(input,3);
     typedef tuple<string,float,float> Format;
     DataFrame df;
     Format tmp;
@@ -552,20 +558,74 @@ int main(void){
         );
         df.rbind( DataRow(r12) );
     }
+    return df;
+}
 
+DataFrame read2(void){
+    ifstream input("../trigger/pt/SingleMu_Pt1To1000_FlatRandomOneOverPt.csv");
+    setSeparators(input);
+    readHeader(input,53);
+    typedef tuple<int,float,float,float,int,float,float,float,float,float,float,int,int,int,int,int,int,int,int,int,int,int,int,int,int,
+                  int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int> Format;
+#define dPhi12_0 13
+#define dPhi12_1 14
+#define dPhi23_0 19
+#define dPhi23_1 20
+#define dPhi34_0 23
+#define dPhi34_1 24
+#define dPhi13_0 15
+#define dPhi13_1 16
+#define dPhi14_0 17
+#define dPhi14_1 18
+#define dPhi24_0 21
+#define dPhi24_1 22
+#define muPtGen  1
+    DataFrame df;
+    Format tmp;
+    for(unsigned int row=0; read_tuple(input,tmp); row++){
+        if( get<11>(tmp) == 15 ){
+            tuple<float,float/*,float,float,float,float,float*/> dPhis = make_tuple(
+                abs(get<dPhi12_0>(tmp)),// get<dPhi23_0>(tmp), get<dPhi34_0>(tmp),
+//                get<dPhi13_0>(tmp), get<dPhi14_0>(tmp), get<dPhi24_0>(tmp),
+                1./get<muPtGen>(tmp)
+            );
+            df.rbind( DataRow(dPhis) );
+        }
+        if( get<12>(tmp) == 15 ){
+            tuple<float,float/*,float,float,float,float,float*/> dPhis = make_tuple(
+                abs(get<dPhi12_1>(tmp)), //get<dPhi23_1>(tmp), get<dPhi34_1>(tmp),
+//                get<dPhi13_1>(tmp), get<dPhi14_1>(tmp), get<dPhi24_1>(tmp),
+                1./get<muPtGen>(tmp)
+            );
+            df.rbind( DataRow(dPhis) );
+        }
+    }
+    return df;
+}
+
+
+int main(void){
     RandomForest rf;
 
-    vector<unsigned int> predictorsIdx = {0};
+    DataFrame df( read2() );
+//    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+//    rf.train(df,predictorsIdx,6);
 
+//    DataFrame df( read1() );
+    vector<unsigned int> predictorsIdx = {0};
     rf.train(df,predictorsIdx,1);
 
-//    rf.ensemble[0].save(cout);
+    rf.ensemble[0].save(cout);
 
     double bias = 0, var = 0;
     long cnt = 0;
-    for(unsigned int row = 0; row < df.nrow(); row++,cnt++){
+    for(unsigned int row = 0; row>=0 && row < df.nrow(); row++,cnt++){
         double prediction = rf.regress( df[row] );
         double truth      = df[row][1].asFloating;
+// cout << df[row] <<endl;
+//        cout << "prediction = "<<prediction <<" truth= "<<truth<<endl;
+//        double prediction = 1./rf.regress( df[row] );
+//        double truth      = 1./df[row][6].asFloating;
         bias +=  prediction - truth;
         var  += (prediction - truth) * (prediction - truth);
     }
