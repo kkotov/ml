@@ -262,8 +262,7 @@ public:
         // definitely, there is room for improvement below
         vector<unsigned int> retval(nTotal);
         if( !replace ){
-            unsigned int i=0;
-            generate_n(retval.begin(), nTotal, [i](void) mutable { return i++; });
+            iota(retval.begin(),retval.end(),0);
             shuffle(retval.begin(),retval.end(),rState);
         } else {
             default_random_engine dre(rState);
@@ -298,7 +297,7 @@ public:
                 median_cut = vals[size/2];
             }
             Tree leaf;
-            leaf.nodes.push_back( Tree::Node( median_cut ) ); //sum/subset.size() ) );
+            leaf.nodes.push_back( Tree::Node( sum/subset.size() ) ); //median_cut ) ); //
             return leaf;
         }
 
@@ -363,14 +362,17 @@ public:
             );
 
             vector<unsigned int> left_subset, right_subset;
-            double median_cut = 0;
+            double median_cut = 0, sum = 0;
             if( df.getSchema()[bestCut->first.first] == 1 ){
                 unsigned int size = subset.size();
                 vector<double> vals(size);
-                for(unsigned int i=0; i<size; ++i)
+                for(unsigned int i=0; i<size; ++i){
                     vals[i] = df[subset[i]][bestCut->first.first].asFloating;
+                    sum += vals[i];
+                }
                 nth_element(vals.begin(), vals.begin() + size/2, vals.end());
                 median_cut = vals[size/2];
+                sum /= size;
             }
             for(unsigned int i : subset)
                 switch(  df[i][bestCut->first.first].type ){
@@ -447,7 +449,7 @@ public:
     void train(const DataFrame& df, const vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
         if( df.nrow() < 1 ) return ;
         rState.seed(0);
-        const int nTrees = 1;
+        const int nTrees = 10;
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
 //for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
@@ -609,7 +611,7 @@ int main(void){
     RandomForest rf;
 
     DataFrame df( read2() );
-    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+    vector<unsigned int> predictorsIdx = {0};//,1,2,3,4,5};
     rf.train(df,predictorsIdx,6);
 
 //    DataFrame df( read1() );
