@@ -239,7 +239,7 @@ public:
 class RandomForest {
 private:
 public:
-    typedef list<pair<unsigned int,unsigned int>> SplitVars; // variable index, level (if categorical)
+    typedef list<pair<unsigned int,unsigned int>> SplitVars; // variable index and level (if categorical)
 
     std::default_random_engine rState;
 
@@ -278,8 +278,7 @@ public:
                         const SplitVars& vars,
                         const vector<unsigned int>& subset = {}
     ){
-        // LDA for categorical response?
-        // other metrics: purity/gini/entrophy/rms
+        // purity metrics: gini/entrophy/rms
 
         if( subset.size() == 0 ) return Tree();
 
@@ -301,9 +300,24 @@ public:
             return leaf;
         }
 
-        // for continuous response simply calculate correlations and pick the strongest; ignore the outliers?
-//        if( df[0][responseIdx].type == Variable::Continuous ){
-            // from https://github.com/koskot77/clustcorr/blob/master/src/utilities.cc
+        // finding best split in regression is solving Eq 9.13 on p.307 of ESL
+        // best = 0
+        // (j,s) = uninitialized
+        // for(var : split_var){
+        //   double sum_l[n_points] = {}, sum2_l[n_points] = {}, sum_r[n_points] = {}, sum2_r[n_points] = {};
+        //   for(s : var_range by one_point){
+        //     sum_l [i] = sum_l [i-1] + y
+        //     sum2_l[i] = sum2_l[i-1] + y*y
+        //   }
+        //   sum_r [0] = sum_l [n-1]
+        //   sum2_r[0] = sum2_r[n-1]
+        //   for(s : reverse(var_range by one_point)){
+        //     sum_r [i] = sum_r [i-1] - y
+        //     sum2_r[i] = sum2_r[i-1] - y*y
+        //   }
+ 
+        //    
+        // }
             unsigned int size = subset.size();
 
             double varTarget = 0, meanTarget = 0;
@@ -360,6 +374,8 @@ public:
                              return true;
                      }
             );
+
+// decrease of impurity?!
 
             vector<unsigned int> left_subset, right_subset;
             double median_cut = 0, sum = 0;
