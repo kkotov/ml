@@ -2,6 +2,7 @@
 #include <fstream>
 #include <tuple>
 #include <list>
+#include <queue>
 #include <vector>
 #include <iterator>
 #include <algorithm>
@@ -191,11 +192,14 @@ private:
 
     friend class RandomForest;
 
-    Tree *left_subtree, *right_subtree; // temporary, used before we pack nodes in a vector below
+    Tree *parent, *left_subtree, *right_subtree; // temporary, used before we pack nodes in a vector below
     size_t tree_size;
     vector<Node> nodes; // vectorized tree - canonical representation after I'm done with growing it
 
-    // pack pointers into a vector, free dynamically allocated memory
+    // for prunning
+    double rss;
+
+    // pack pointers into a vector, free dynamically allocated memory, strip subsets
     size_t vectorize(vector<Node>& dest) {
         // sanity checks
         //  uninitialized?
@@ -278,7 +282,7 @@ public:
         return true;
     }
 
-    Tree(void) : left_subtree(0), right_subtree(0), tree_size(0), nodes(0) {}
+    Tree(void) : parent(0), left_subtree(0), right_subtree(0), tree_size(0), nodes(0), rss(0) {}
     // tree is an owner of its subtrees
     ~Tree(void){
         if( left_subtree  ) delete left_subtree;
@@ -333,30 +337,30 @@ public:
 
 #define MIN_ENTRIES 5
 
+        size_t size = subset.size();
+        double sum = 0, sum2 = 0;
+        for(unsigned int i=0; i<size; ++i){
+            unsigned int row = subset[i];
+            sum  += df[row][responseIdx].asFloating;
+            sum2 += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+        }
+        double rss = sum2 - sum*sum/size;
+
         // do not grow tree beyond MIN_ENTRIES or less 
-        if( subset.size() <= MIN_ENTRIES ){
-            double sum = 0;
-            for(unsigned int i=0; i<subset.size(); i++)
-                sum += df[ subset[i] ][ responseIdx ].asFloating;
-            Tree::Node leaf( sum/subset.size() );
+        if( size <= MIN_ENTRIES ){
+            Tree::Node leaf( sum/size );
             Tree *retval = new Tree();
             retval->nodes.push_back(leaf);
             retval->tree_size = 1;
+            retval->rss = rss;
             return retval;
         }
 
         // finding best split in regression is solving Eq 9.13 on p.307 of ESLII
-        size_t size = subset.size();
         size_t bestSplitVar = 0;
         double bestSplitPoint = 0;
         double bestSplitImpurityDecrease = numeric_limits<double>::max();
         for(pair<unsigned int,unsigned int> var : vars){
-            double sum = 0, sum2 = 0;
-            for(unsigned int i=0; i<size; ++i){
-                unsigned int row = subset[i];
-                sum  += df[row][responseIdx].asFloating;
-                sum2 += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
-            }
             vector<unsigned int> indices(size);
             iota(indices.begin(),indices.end(),0);
             sort(indices.begin(),
@@ -419,14 +423,17 @@ public:
                 }
 
         Tree *tree = new Tree();
+        tree->rss = rss;
 
-        // Continue growing tree until any of the subsets are too small, say 5 entries
+        // Continue growing tree until any of the subsets are smaller the MIN_ENTRIES
         if( left_subset.size() > MIN_ENTRIES && right_subset.size() > MIN_ENTRIES ){
 
             // good place to use the threads
             Tree *left_subtree  = findBestSplits(df, responseIdx, vars, left_subset);
             Tree *right_subtree = findBestSplits(df, responseIdx, vars, right_subset);
 
+            left_subtree->parent  = tree;
+            right_subtree->parent = tree;
             tree->left_subtree  = left_subtree;
             tree->right_subtree = right_subtree;
             tree->nodes.resize(1);
@@ -444,19 +451,39 @@ public:
             }
 
         } else {
-            double sum = 0;
-            for(unsigned int i=0; i<subset.size(); i++)
-                sum += df[ subset[i] ][ responseIdx ].asFloating;
-            Tree::Node leaf( sum/subset.size() );
+            Tree::Node leaf( sum/size );
             tree->tree_size = 1;
             tree->nodes.push_back(leaf);
         }
+#undef MIN_ENTRIES
 
         return tree;
     }
 
-    // cost-complexity pruning as described in ESLII p.308
+    // weakest link pruning as prescribed in ESLII p.308
     void prune(Tree *tree){
+        vector<Tree*> preLeafs;
+        preLeafs.reserve(tree->tree_size);
+        // traverse the tree with local FIFO simulating stack of recursion
+        queue<Tree*> fifo;
+        fifo.push(tree);
+        while( !fifo.empty() ){
+            Tree *t = fifo.front();
+            fifo.pop();
+            Tree *t_l = t->left_subtree;
+            Tree *t_r = t->right_subtree;
+            if( t_l && t_r ){
+                // look ahead for leafs
+                if( t_l->left_subtree == 0 && t_l->right_subtree == 0 &&
+                    t_r->left_subtree == 0 && t_r->right_subtree == 0 ){
+                    preLeafs.push_back(t);
+                } else {
+                    fifo.push(t_l);
+                    fifo.push(t_r);
+                }
+            }
+        }
+        
 
     }
 
