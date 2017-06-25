@@ -187,8 +187,47 @@ private:
         explicit Node(double v) : value((double)    v), position(0), left_child(0), right_child(0){}
         explicit Node(long   v) : value((long long) v), position(0), left_child(0), right_child(0){}
     };
+
     friend class RandomForest;
-    vector<Node> nodes;
+
+    Tree *left_subtree, *right_subtree; // temporary, used before we pack nodes in a vector below
+    size_t tree_size;
+    vector<Node> nodes; // vectorized tree - canonical representation after I'm done with growing it
+
+    // pack pointers into a vector, free memory
+    size_t vectorize(vector<Node>& dest) {
+        // sanity checks
+        //  uninitialized?
+        if( nodes.size() == 0 ) return 0;
+        //  broken invariant (either vectorized or both subtrees present)?
+        if( ( left_subtree == 0 && right_subtree != 0 ) ||
+            ( left_subtree != 0 && right_subtree == 0 ) ) return 0;
+        // already vectorized?
+        if( tree_size == 0 ) return 0;
+
+        // pre-order traversal
+        dest.push_back(nodes[0]);
+        Node& local_root = dest.back();
+
+        size_t size = 1;
+
+        if( left_subtree != 0 && right_subtree != 0 ){
+            local_root.left_child  = dest.size();
+            size += left_subtree->vectorize(dest);
+            delete left_subtree;
+            left_subtree = 0;
+
+            local_root.right_child = dest.size();
+            size += right_subtree->vectorize(dest);
+            delete right_subtree;
+            right_subtree = 0;
+        }
+
+        // no longer need this variable -> use it to indicate that tree is vectorized
+        tree_size = 0;
+
+        return size;
+    }
 
 public:
     Variable traverse(const DataRow& row, const Node& root) const {
@@ -225,6 +264,8 @@ public:
         return true;
     }
     bool save(ostream &output){
+        if( left_subtree != 0 || right_subtree != 0 )
+            return false;
         for(unsigned int n=0; n<nodes.size(); n++)
             output << n
                    << "," << nodes[n].value
@@ -233,6 +274,13 @@ public:
                    << "," << nodes[n].right_child
                    << endl;
         return true;
+    }
+
+    Tree(void) : left_subtree(0), right_subtree(0), tree_size(0), nodes(0) {}
+    // tree is an owner of its subtrees
+    ~Tree(void){
+        if( left_subtree  ) delete left_subtree;
+        if( right_subtree ) delete right_subtree;
     }
 };
 
@@ -272,182 +320,135 @@ public:
         return vector<unsigned int>(retval.begin(), retval.begin() + (nSampled<nTotal?nSampled:nTotal));
     }
 
-    // simplest forward-stepwise
-    Tree findBestSplits(const DataFrame& df,
-                        unsigned int responseIdx,
-                        const SplitVars& vars,
-                        const vector<unsigned int>& subset = {}
+    // implementation of CART with gini/entrophy/rms purity metrics
+    Tree* findBestSplits(const DataFrame& df,
+                         unsigned int responseIdx,
+                         const SplitVars& vars,
+                         const vector<unsigned int>& subset = {}
     ){
-        // purity metrics: gini/entrophy/rms
+        // safety: nothing to split on? 
+        if( vars.empty() ) return new Tree();
 
-        if( subset.size() == 0 ) return Tree();
-
-        // end of recursion
-        if( vars.empty() ){
-            double median_cut = 0, sum = 0;
-            if( df.getSchema()[responseIdx] == 1 ){
-                unsigned int size = subset.size();
-                vector<double> vals(size);
-                for(unsigned int i=0; i<size; ++i){
-                    vals[i] = df[subset[i]][responseIdx].asFloating;
-                    sum += vals[i];
-                }
-                nth_element(vals.begin(), vals.begin() + size/2, vals.end());
-                median_cut = vals[size/2];
-            }
-            Tree leaf;
-            leaf.nodes.push_back( Tree::Node( sum/subset.size() ) ); //median_cut ) ); //
-            return leaf;
+        // do not grow tree beyond 5 entries of less 
+        if( subset.size() <= 5 ){
+            double sum = 0;
+            for(unsigned int i=0; i<subset.size(); i++)
+                sum += df[ subset[i] ][ responseIdx ].asFloating;
+            Tree::Node leaf( sum/subset.size() );
+            Tree *retval = new Tree();
+            retval->nodes.push_back(leaf);
+            retval->tree_size = 1;
+            return retval;
         }
 
-        // finding best split in regression is solving Eq 9.13 on p.307 of ESL
-        // best = 0
-        // (j,s) = uninitialized
-        // for(var : split_var){
-        //   double sum_l[n_points] = {}, sum2_l[n_points] = {}, sum_r[n_points] = {}, sum2_r[n_points] = {};
-        //   for(s : var_range by one_point){
-        //     sum_l [i] = sum_l [i-1] + y
-        //     sum2_l[i] = sum2_l[i-1] + y*y
-        //   }
-        //   sum_r [0] = sum_l [n-1]
-        //   sum2_r[0] = sum2_r[n-1]
-        //   for(s : reverse(var_range by one_point)){
-        //     sum_r [i] = sum_r [i-1] - y
-        //     sum2_r[i] = sum2_r[i-1] - y*y
-        //   }
- 
-        //    
-        // }
-            unsigned int size = subset.size();
-
-            double varTarget = 0, meanTarget = 0;
+        // finding best split in regression is solving Eq 9.13 on p.307 of ESLII
+        size_t size = subset.size();
+        size_t bestSplitVar = 0;
+        double bestSplitPoint = 0;
+        double bestSplitImpurityDecrease = 100000000000000;
+        for(pair<unsigned int,unsigned int> var : vars){
+            double sum = 0, sum2 = 0;
             for(unsigned int i=0; i<size; ++i){
                 unsigned int row = subset[i];
-                varTarget  += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
-                meanTarget += df[row][responseIdx].asFloating;
+                sum  += df[row][responseIdx].asFloating;
+                sum2 += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
             }
-            double sdTarget = sqrt((varTarget - meanTarget*meanTarget/size)/(size - 1));
-            meanTarget /= size;
-
-            struct HashPair { size_t operator()(const pair<unsigned int,unsigned int>& p) const { return p.first*10 + p.second; } };
-            unordered_map<pair<unsigned int,unsigned int>, double, HashPair> corr;
-            for(pair<unsigned int,unsigned int> pick : vars){
-                double var = 0, crossVar = 0, mean = 0;
-                for(unsigned int i=0; i<size; ++i){
-                    unsigned int row = subset[i];
-                    if( df.getSchema()[ pick.first ] == 1 ){
-                        mean     += df[row][pick.first].asFloating;
-                        var      += df[row][pick.first].asFloating * df[row][pick.first].asFloating;
-                        crossVar += df[row][pick.first].asFloating * df[row][responseIdx].asFloating;
-                    } else {
-                        mean     += (df[row][pick.first].asIntegral == pick.second);
-                        var      += (df[row][pick.first].asIntegral == pick.second);
-                        crossVar += (df[row][pick.first].asIntegral == pick.second) * df[row][responseIdx].asFloating;
-                    }
-                }
-                double sd = sqrt((var - mean*mean/size)/(size - 1));
-                mean /= size;
-                corr[pick] = (sd>0 ? size/double(size-1) * (crossVar/size-meanTarget*mean) / sdTarget / sd : 0);
-            }
-
-            unordered_map<pair<unsigned int,unsigned int>, double, HashPair>::const_iterator bestCut = 
-                max_element(corr.cbegin(),
-                            corr.cend(),
-                            [](pair<pair<unsigned int,unsigned int>, double> a, pair<pair<unsigned int,unsigned int>, double> b){
-                                return a.second < b.second;
-                            }
-                );
-
-//cout << " var= " << bestCut->first.first << " idx= " << bestCut->first.second << " corr= " << bestCut->second << " vars.size() " << vars.size() << endl;
-
-            SplitVars remainingSplitVars;
-            bool once = false;
-            copy_if( vars.cbegin(),
-                     vars.cend(),
-                     back_inserter(remainingSplitVars),
-                     [&bestCut,&once](pair<unsigned int,unsigned int> s){
-                         if( !once ){
-                             bool match = s.first != bestCut->first.first || s.second != bestCut->first.second;
-                             if( !match ) once = true;
-                             return match;
-                         } else
-                             return true;
-                     }
+            vector<unsigned int> indices(size);
+            iota(indices.begin(),indices.end(),0);
+            sort(indices.begin(),
+                 indices.end(),
+                 [&subset, &df, &var] (unsigned int i, unsigned int j) {
+                     return df[ subset[i] ][var.first].asFloating < df[ subset[j] ][var.first].asFloating;
+                 }
             );
+            // functional form of Eq 9.13 on p.307 of ESLII
+            std::function<double(double,double,size_t,double,double,size_t)> metric =
+                [](double sum_l, double sum2_l, size_t size_l, double sum_r, double sum2_r, size_t size_r){
+                    return (size_l ? (sum2_l - sum_l * sum_l / size_l) : 0) +
+                           (size_r ? (sum2_r - sum_r * sum_r / size_r) : 0);
+                };
+            // start with all points being on one side of the split
+            double sum_r = sum, sum2_r = sum2, sum_l = 0, sum2_l = 0;
+            size_t bestSplitPointSoFar = 0, size_l = 0, size_r = size;
+            double bestMetricSoFar = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
+            // run over the sorted df representation
+            for(unsigned int index : indices){
+                unsigned int row = subset[index];
+                // advancing the split - moving a point from right to left of the split
+                sum_r  -= df[row][responseIdx].asFloating;
+                sum2_r -= df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+                sum_l  += df[row][responseIdx].asFloating;
+                sum2_l += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+                size_r--;
+                size_l++;
+                double newMetric = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
+                if( newMetric < bestMetricSoFar ){
+                    bestMetricSoFar     = newMetric;
+                    bestSplitPointSoFar = row;
+                }
+            }
+            if( bestMetricSoFar < bestSplitImpurityDecrease ){
+                bestSplitVar   = var.first;
+                bestSplitPoint = df[bestSplitPointSoFar][var.first].asFloating;
+                bestSplitImpurityDecrease = bestMetricSoFar;
+            }
+        }
 
-// decrease of impurity?!
+//    cout << "bestSplitPoint: " << bestSplitPoint << " bestSplitImpurityDecrease: " << bestSplitImpurityDecrease << " sample:" << subset.size() << endl; 
 
             vector<unsigned int> left_subset, right_subset;
-            double median_cut = 0, sum = 0;
-            if( df.getSchema()[bestCut->first.first] == 1 ){
-                unsigned int size = subset.size();
-                vector<double> vals(size);
-                for(unsigned int i=0; i<size; ++i){
-                    vals[i] = df[subset[i]][bestCut->first.first].asFloating;
-                    sum += vals[i];
-                }
-                nth_element(vals.begin(), vals.begin() + size/2, vals.end());
-                median_cut = vals[size/2];
-                sum /= size;
-            }
             for(unsigned int i : subset)
-                switch(  df[i][bestCut->first.first].type ){
+                switch(  df[i][bestSplitVar].type ){
                     case Variable::Continuous :
-                        if( df[i][bestCut->first.first].asFloating < median_cut )
+                        if( df[i][bestSplitVar].asFloating < bestSplitPoint )
                             left_subset.push_back(i);
                         else
                             right_subset.push_back(i);
                     break ;
-                    case Variable::Categorical:
-                        if( df[i][bestCut->first.first].asIntegral == bestCut->first.second )
-                            left_subset.push_back(i);
-                        else
-                            right_subset.push_back(i);
-                    break ;
-                    default : return Tree(); break;
+//                    case Variable::Categorical:
+//                        if( df[i][bestSplitVar].asIntegral == bestCut->first.second )
+//                            left_subset.push_back(i);
+//                        else
+//                            right_subset.push_back(i);
+ //                   break ;
+                    default : return new Tree(); break;
                 }
 
-            // good place to use the thread pool
-            Tree left_subtree  = findBestSplits(df, responseIdx, remainingSplitVars, left_subset);
-            Tree right_subtree = findBestSplits(df, responseIdx, remainingSplitVars, right_subset);
+        Tree *tree = new Tree();
 
-            Tree tree;
-            tree.nodes.resize(1 + left_subtree.nodes.size() + right_subtree.nodes.size());
+        // Continue growing tree until any of the subsets are too small, say 5 entries
+        if( left_subset.size() > 5 && right_subset.size() > 5 ){
+
+            // good place to use the threads
+            Tree *left_subtree  = findBestSplits(df, responseIdx, vars, left_subset);
+            Tree *right_subtree = findBestSplits(df, responseIdx, vars, right_subset);
+
+            tree->left_subtree  = left_subtree;
+            tree->right_subtree = right_subtree;
+            tree->nodes.resize(1);
+            tree->tree_size = 1 + left_subtree->tree_size + right_subtree->tree_size;
+
             // copy the local root node
-            Tree::Node& local_root = tree.nodes[0];
-            local_root.position = bestCut->first.first;
-            if( df.getSchema()[bestCut->first.first] == 1 ){
+            Tree::Node& local_root = tree->nodes[0];
+            local_root.position = bestSplitVar;
+            if( df.getSchema()[bestSplitVar] == 1 ){
                 local_root.value.type = Variable::Continuous;
-                local_root.value.asFloating = median_cut;
+                local_root.value.asFloating = bestSplitPoint;
             } else {
                 local_root.value.type = Variable::Categorical;
-                local_root.value.asIntegral = bestCut->first.second;
+                local_root.value.asIntegral = 0;
             }
-            local_root.left_child = (left_subtree.nodes.size()?1:0); // left subtree (if exists) is placed right after the root -> index=1
-            transform(left_subtree.nodes.cbegin(), // source from
-                      left_subtree.nodes.cend(),   // source till
-                      tree.nodes.begin() + 1, // destination
-                      [] (Tree::Node node) {
-                          // increment indecies only for existing children, left 0 for non-existing
-                          if( node.left_child ) node.left_child  += 1;
-                          if( node.right_child) node.right_child += 1;
-                          return node;
-                      }
-            );
-            unsigned int offset = left_subtree.nodes.size();
-            local_root.right_child = (offset+right_subtree.nodes.size() ? 1 + offset : 0); // right subtree is placed after the left one
-            transform(right_subtree.nodes.cbegin(), // source from
-                      right_subtree.nodes.cend(),   // source till
-                      tree.nodes.begin() + 1 + offset, // destination
-                      [offset] (Tree::Node node) {
-                          // increment indecies only for existing children, left 0 for non-existing
-                          if( node.left_child ) node.left_child  += 1 + offset;
-                          if( node.right_child) node.right_child += 1 + offset;
-                          return node;
-                      }
-            );
-            return tree;
-//        }
+
+        } else {
+            double sum = 0;
+            for(unsigned int i=0; i<subset.size(); i++)
+                sum += df[ subset[i] ][ responseIdx ].asFloating;
+            Tree::Node leaf( sum/subset.size() );
+            tree->tree_size = 1;
+            tree->nodes.push_back(leaf);
+        }
+
+        return tree;
     }
 
     vector<Tree> ensemble;
@@ -465,15 +466,20 @@ public:
     void train(const DataFrame& df, const vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
         if( df.nrow() < 1 ) return ;
         rState.seed(0);
-        const int nTrees = 10;
+        const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
-            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
+            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, 1)); //floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
 //for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
-            Tree tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
-            ensemble.push_back( move(tree) );
+            Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
+//            pruneTree(tree);
+            vector<Tree::Node> nodes;
+            nodes.reserve(tree->tree_size);
+            tree->vectorize(nodes);
+            tree->nodes.swap(nodes);
+//tree->save(cout);
+            ensemble.push_back( move(*tree) );
         }
-        
     }
 
     RandomForest(void){}
@@ -626,13 +632,13 @@ DataFrame read2(void){
 int main(void){
     RandomForest rf;
 
-    DataFrame df( read2() );
-    vector<unsigned int> predictorsIdx = {0};//,1,2,3,4,5};
-    rf.train(df,predictorsIdx,6);
+//    DataFrame df( read2() );
+//    vector<unsigned int> predictorsIdx = {0};//,1,2,3,4,5};
+//    rf.train(df,predictorsIdx,6);
 
-//    DataFrame df( read1() );
-//    vector<unsigned int> predictorsIdx = {0,1};
-//    rf.train(df,predictorsIdx,2);
+    DataFrame df( read1() );
+    vector<unsigned int> predictorsIdx = {0};
+    rf.train(df,predictorsIdx,0);
 
 //    rf.ensemble[0].save(cout);
 
@@ -640,7 +646,7 @@ int main(void){
     long cnt = 0;
     for(unsigned int row = 0; row>=0 && row < df.nrow(); row++,cnt++){
         double prediction = rf.regress( df[row] );
-        double truth      = df[row][6].asFloating;
+        double truth      = df[row][0].asFloating; // 6
 // cout << df[row] <<endl;
 //        cout << "prediction = "<<prediction <<" truth= "<<truth<<endl;
 //        double prediction = 1./rf.regress( df[row] );
