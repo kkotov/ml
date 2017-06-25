@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <string>
 #include <random>
+#include <limits>
 #include <unordered_set>
 #include <unordered_map>
 using namespace std;
@@ -194,7 +195,7 @@ private:
     size_t tree_size;
     vector<Node> nodes; // vectorized tree - canonical representation after I'm done with growing it
 
-    // pack pointers into a vector, free memory
+    // pack pointers into a vector, free dynamically allocated memory
     size_t vectorize(vector<Node>& dest) {
         // sanity checks
         //  uninitialized?
@@ -211,6 +212,7 @@ private:
 
         size_t size = 1;
 
+        // recure if not a terminal node
         if( left_subtree != 0 && right_subtree != 0 ){
             local_root.left_child  = dest.size();
             size += left_subtree->vectorize(dest);
@@ -329,8 +331,10 @@ public:
         // safety: nothing to split on? 
         if( vars.empty() ) return new Tree();
 
-        // do not grow tree beyond 5 entries of less 
-        if( subset.size() <= 5 ){
+#define MIN_ENTRIES 5
+
+        // do not grow tree beyond MIN_ENTRIES or less 
+        if( subset.size() <= MIN_ENTRIES ){
             double sum = 0;
             for(unsigned int i=0; i<subset.size(); i++)
                 sum += df[ subset[i] ][ responseIdx ].asFloating;
@@ -345,7 +349,7 @@ public:
         size_t size = subset.size();
         size_t bestSplitVar = 0;
         double bestSplitPoint = 0;
-        double bestSplitImpurityDecrease = 100000000000000;
+        double bestSplitImpurityDecrease = numeric_limits<double>::max();
         for(pair<unsigned int,unsigned int> var : vars){
             double sum = 0, sum2 = 0;
             for(unsigned int i=0; i<size; ++i){
@@ -394,7 +398,7 @@ public:
             }
         }
 
-//    cout << "bestSplitPoint: " << bestSplitPoint << " bestSplitImpurityDecrease: " << bestSplitImpurityDecrease << " sample:" << subset.size() << endl; 
+//    cout << "bestSplitVar: " << bestSplitVar << " bestSplitPoint: " << bestSplitPoint << " bestSplitImpurityDecrease: " << bestSplitImpurityDecrease << " sample:" << subset.size() << endl; 
 
             vector<unsigned int> left_subset, right_subset;
             for(unsigned int i : subset)
@@ -417,7 +421,7 @@ public:
         Tree *tree = new Tree();
 
         // Continue growing tree until any of the subsets are too small, say 5 entries
-        if( left_subset.size() > 5 && right_subset.size() > 5 ){
+        if( left_subset.size() > MIN_ENTRIES && right_subset.size() > MIN_ENTRIES ){
 
             // good place to use the threads
             Tree *left_subtree  = findBestSplits(df, responseIdx, vars, left_subset);
@@ -436,7 +440,7 @@ public:
                 local_root.value.asFloating = bestSplitPoint;
             } else {
                 local_root.value.type = Variable::Categorical;
-                local_root.value.asIntegral = 0;
+                local_root.value.asIntegral = 0; // to be implemented
             }
 
         } else {
@@ -449,6 +453,11 @@ public:
         }
 
         return tree;
+    }
+
+    // cost-complexity pruning as described in ESLII p.308
+    void prune(Tree *tree){
+
     }
 
     vector<Tree> ensemble;
@@ -468,11 +477,11 @@ public:
         rState.seed(0);
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
-            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, 1)); //floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
+            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
 //for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
-//            pruneTree(tree);
+            prune(tree);
             vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
             tree->vectorize(nodes);
@@ -632,13 +641,13 @@ DataFrame read2(void){
 int main(void){
     RandomForest rf;
 
-//    DataFrame df( read2() );
-//    vector<unsigned int> predictorsIdx = {0};//,1,2,3,4,5};
-//    rf.train(df,predictorsIdx,6);
+    DataFrame df( read2() );
+    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+    rf.train(df,predictorsIdx,6);
 
-    DataFrame df( read1() );
-    vector<unsigned int> predictorsIdx = {0};
-    rf.train(df,predictorsIdx,0);
+//    DataFrame df( read1() );
+//    vector<unsigned int> predictorsIdx = {0};
+//    rf.train(df,predictorsIdx,1);
 
 //    rf.ensemble[0].save(cout);
 
@@ -646,7 +655,7 @@ int main(void){
     long cnt = 0;
     for(unsigned int row = 0; row>=0 && row < df.nrow(); row++,cnt++){
         double prediction = rf.regress( df[row] );
-        double truth      = df[row][0].asFloating; // 6
+        double truth      = df[row][6].asFloating; // 6
 // cout << df[row] <<endl;
 //        cout << "prediction = "<<prediction <<" truth= "<<truth<<endl;
 //        double prediction = 1./rf.regress( df[row] );
