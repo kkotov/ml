@@ -462,8 +462,7 @@ public:
 
     // weakest link pruning as prescribed in ESLII p.308
     void prune(Tree *tree){
-        vector<Tree*> preLeafs;
-        preLeafs.reserve(tree->tree_size);
+        unordered_map<Tree*,unsigned int> maxHupsToLeaf;
         // traverse the tree with local FIFO simulating stack of recursion
         queue<Tree*> fifo;
         fifo.push(tree);
@@ -472,19 +471,33 @@ public:
             fifo.pop();
             Tree *t_l = t->left_subtree;
             Tree *t_r = t->right_subtree;
-            if( t_l && t_r ){
-                // look ahead for leafs
-                if( t_l->left_subtree == 0 && t_l->right_subtree == 0 &&
-                    t_r->left_subtree == 0 && t_r->right_subtree == 0 ){
-                    preLeafs.push_back(t);
-                } else {
-                    fifo.push(t_l);
-                    fifo.push(t_r);
+            // is leaf?
+            if( t_l==0 && t_r==0 ){
+                maxHupsToLeaf[t] = 0;
+                // climb up the lader of parents
+                size_t hups = 1;
+                for(Tree *p=t->parent; p->parent; p=p->parent,++hups){
+                    unordered_map<Tree*,unsigned int>::iterator tr = maxHupsToLeaf.find(p);
+                    if( tr != maxHupsToLeaf.end() && tr->second<hups )
+                        tr->second = hups;
                 }
+            } else {
+                fifo.push(t_l);
+                fifo.push(t_r);
             }
         }
+        vector<pair<Tree*,int>> orderedNodes(maxHupsToLeaf.size());
+        partial_sort_copy(maxHupsToLeaf.cbegin(),
+                          maxHupsToLeaf.cend(),
+                          orderedNodes.begin(),
+                          orderedNodes.end(),
+                          [](pair<Tree*,unsigned int> i, pair<Tree*,unsigned int> j){ 
+                              return i.second < j.second || ( i.second == j.second && i.first->rss < j.first->rss );
+                          }
+        );
         
 
+        ;
     }
 
     vector<Tree> ensemble;
