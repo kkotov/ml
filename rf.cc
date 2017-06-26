@@ -500,7 +500,9 @@ public:
 
         make_heap(candsForCollapse.begin(), candsForCollapse.end(),rssGreaterEq);
 
-        while( rssTotal < alpha * tree->tree_size && tree->tree_size > 1 && !candsForCollapse.empty() ){
+//cout<<" rssTotal: " << rssTotal << " tree_size: "<<tree->tree_size<<endl;
+
+        while( rssTotal < alpha * tree->tree_size ){
             pop_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
             Tree *t = candsForCollapse.back();
             candsForCollapse.pop_back();
@@ -518,8 +520,10 @@ public:
             t->nodes[0].value.asFloating = t->sum/t->set_size;
             // parent may become a candidate for one of the next collapses
             Tree *p = t->parent;
+            // already at the very top?
+            if( p == 0 ) break;
             tree_size_decrease[p] += tree_size_decrease[t];
-            if( p->tree_size - tree_size_decrease[p] == 2 ){
+            if( p->tree_size - tree_size_decrease[p] == 3 ){
                 candsForCollapse.push_back(p);
                 push_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
             }
@@ -548,8 +552,7 @@ public:
 //for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
-cout<<tree->tree_size<<endl;
-            prune(tree,10);
+            prune(tree,0.09);
             vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
             tree->vectorize(nodes);
