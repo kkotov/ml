@@ -134,7 +134,9 @@ public:
 
     std::default_random_engine rState;
 
-    SplitVars generateRandomSplitVars(const std::vector<unsigned int> &schema, const std::vector<unsigned int>& predictorsIdx, unsigned int mtry){
+    SplitVars generateRandomSplitVars(const std::vector<unsigned int>& schema,
+                                      const std::vector<unsigned int>& predictorsIdx,
+                                      unsigned int mtry){
         SplitVars vars;
         std::default_random_engine dre(rState);
         std::uniform_int_distribution<unsigned int> uid(0, predictorsIdx.size()-1), uid_l;
@@ -149,7 +151,9 @@ public:
         return vars;
     }
 
-    std::vector<unsigned int> sample(unsigned int nTotal, unsigned int nSampled, bool replace = false){
+    std::vector<unsigned int> sample(unsigned int nTotal,
+                                     unsigned int nSampled,
+                                     bool replace = false){
         // definitely, there is room for improvement below
         std::vector<unsigned int> retval(nTotal);
         if( !replace ){
@@ -158,12 +162,18 @@ public:
         } else {
             std::default_random_engine dre(rState);
             std::uniform_int_distribution<> uid(0, nTotal);
-            std::generate_n( retval.begin(), (nSampled<nTotal?nSampled:nTotal), [&uid,&dre](void){ return uid(dre); } );
+            std::generate_n( retval.begin(),
+                             (nSampled < nTotal ? nSampled : nTotal),
+                             [&uid, &dre](void){ return uid(dre); }
+            );
         }
-        return std::vector<unsigned int>(retval.begin(), retval.begin() + (nSampled<nTotal?nSampled:nTotal));
+        return std::vector<unsigned int>(retval.begin(),
+                                         retval.begin() +
+                                         (nSampled < nTotal ? nSampled : nTotal)
+               );
     }
 
-    // thread-safe implementation of CART with gini/entrophy/rms purity metrics
+    // thread-safe implementation of CART with gini/entrophy/rms purity metrices
     Tree* findBestSplits(const DataFrame& df,
                          unsigned int responseIdx,
                          const SplitVars& vars,
@@ -333,8 +343,6 @@ public:
         std::function<bool(Tree*,Tree*)> rssGreaterEq = [](Tree* i, Tree* j){ return i->rss >= j->rss; };
 
         std::make_heap(candsForCollapse.begin(), candsForCollapse.end(),rssGreaterEq);
-
-//cout<<" rssTotal: " << rssTotal << " tree_size: "<<tree->tree_size<<endl;
 
         while( rssTotal < alpha * tree->tree_size ){
             std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);

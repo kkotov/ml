@@ -9,6 +9,8 @@
 #include "DataFrame.h"
 #include "RandomForest.h"
 
+// g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf test.cc -lpthread
+
 using namespace std;
 
 DataFrame oneHOTencode(const vector<int> &col, unordered_set<int> levels = {}, bool nMinusOne = true){
