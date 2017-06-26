@@ -6,6 +6,7 @@
 #include <vector>
 #include <iterator>
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <random>
 #include <limits>
@@ -192,15 +193,15 @@ private:
 
     friend class RandomForest;
 
-    Tree *parent, *left_subtree, *right_subtree; // temporary, used before we pack nodes in a vector below
-    size_t tree_size;
-    vector<Node> nodes; // vectorized tree - canonical representation after I'm done with growing it
+    Tree *parent, *left_subtree, *right_subtree; // temporary, used before I pack nodes in a vector
+    size_t tree_size; // 1 + sizeof(left_subtree) + sizeof(right_subtree), valid only until tree is packed
+    vector<Node> nodes; // vectorized tree - packed representation after I'm done with growing it
 
-    // for prunning
-    double rss, sum, sum2;
-    size_t set_size;
+    // regression characteristics for prunning, valid before tree is packed
+    double rss, sum, sum2; // RSS, sum, and sum of squares of dependent variable on training entries
+    size_t set_size; // number of training entries - entries "seen" by this tree
 
-    // pack pointers into a vector, free dynamically allocated memory
+    // pack tree into a vector, free dynamically allocated memory, strip auxiliary characteristics
     size_t vectorize(vector<Node>& dest) {
         // sanity checks
         //  uninitialized?
@@ -230,7 +231,7 @@ private:
             right_subtree = 0;
         }
 
-        // no longer need this variable -> use it to indicate that tree is vectorized
+        // no longer need this variable -> use it to indicate that this tree is already packed
         tree_size = 0;
 
         return size;
@@ -267,10 +268,11 @@ public:
         return traverse(row,nodes[0]);
     }
 
-    bool load(istream &input){
-        return true;
+    bool load(istream& input){
+        return true; // to be implemented
     }
-    bool save(ostream &output){
+    bool save(ostream& output){
+        // not packed? - error
         if( left_subtree != 0 || right_subtree != 0 )
             return false;
         for(unsigned int n=0; n<nodes.size(); n++)
@@ -327,7 +329,7 @@ public:
         return vector<unsigned int>(retval.begin(), retval.begin() + (nSampled<nTotal?nSampled:nTotal));
     }
 
-    // implementation of CART with gini/entrophy/rms purity metrics
+    // thread-safe implementation of CART with gini/entrophy/rms purity metrics
     Tree* findBestSplits(const DataFrame& df,
                          unsigned int responseIdx,
                          const SplitVars& vars,
@@ -336,8 +338,10 @@ public:
         // safety: nothing to split on? 
         if( vars.empty() ) return new Tree();
 
+// criterion to stop growing tree
 #define MIN_ENTRIES 5
 
+        // caclulate general characteristics: RSS, sum, and sum of squares of responces on training events
         size_t size = subset.size();
         double sum = 0, sum2 = 0;
         for(unsigned int i=0; i<size; ++i){
@@ -347,24 +351,27 @@ public:
         }
         double rss = sum2 - sum*sum/size;
 
+        // remember the characteristics
+        Tree *tree = new Tree();
+        tree->rss  = rss;
+        tree->sum  = sum;
+        tree->sum2 = sum2;
+        tree->set_size = size;
+
         // do not grow tree beyond MIN_ENTRIES or less 
         if( size <= MIN_ENTRIES ){
             Tree::Node leaf( sum/size );
-            Tree *retval = new Tree();
-            retval->nodes.push_back(leaf);
-            retval->tree_size = 1;
-            retval->rss  = rss;
-            retval->sum  = sum;
-            retval->sum2 = sum2;
-            retval->set_size = size;
-            return retval;
+            tree->nodes.push_back(leaf);
+            tree->tree_size = 1; // leaf
+            return tree;
         }
 
         // finding best split in regression is solving Eq 9.13 on p.307 of ESLII
         size_t bestSplitVar = 0;
         double bestSplitPoint = 0;
-        double bestSplitImpurityDecrease = numeric_limits<double>::max();
+        double bestSplitMetric = numeric_limits<double>::max();
         for(pair<unsigned int,unsigned int> var : vars){
+            // order training entries (well, their indices) along the candidate variable for the split
             vector<unsigned int> indices(size);
             iota(indices.begin(),indices.end(),0);
             sort(indices.begin(),
@@ -379,11 +386,11 @@ public:
                     return (size_l ? (sum2_l - sum_l * sum_l / size_l) : 0) +
                            (size_r ? (sum2_r - sum_r * sum_r / size_r) : 0);
                 };
-            // start with all points being on one side of the split
+            // start with all points being on one (right) side of the split
             double sum_r = sum, sum2_r = sum2, sum_l = 0, sum2_l = 0;
             size_t bestSplitPointSoFar = 0, size_l = 0, size_r = size;
             double bestMetricSoFar = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
-            // run over the sorted df representation
+            // and run over the sorted df representation
             for(unsigned int index : indices){
                 unsigned int row = subset[index];
                 // advancing the split - moving a point from right to left of the split
@@ -399,14 +406,12 @@ public:
                     bestSplitPointSoFar = row;
                 }
             }
-            if( bestMetricSoFar < bestSplitImpurityDecrease ){
-                bestSplitVar   = var.first;
-                bestSplitPoint = df[bestSplitPointSoFar][var.first].asFloating;
-                bestSplitImpurityDecrease = bestMetricSoFar;
+            if( bestMetricSoFar < bestSplitMetric ){
+                bestSplitVar    = var.first;
+                bestSplitPoint  = df[bestSplitPointSoFar][var.first].asFloating;
+                bestSplitMetric = bestMetricSoFar;
             }
         }
-
-//    cout << "bestSplitVar: " << bestSplitVar << " bestSplitPoint: " << bestSplitPoint << " bestSplitImpurityDecrease: " << bestSplitImpurityDecrease << " sample:" << subset.size() << endl; 
 
             vector<unsigned int> left_subset, right_subset;
             for(unsigned int i : subset)
@@ -426,16 +431,10 @@ public:
                     default : return new Tree(); break;
                 }
 
-        Tree *tree = new Tree();
-        tree->rss  = rss;
-        tree->sum  = sum;
-        tree->sum2 = sum2;
-        tree->set_size = size;
-
         // Continue growing tree until any of the subsets are smaller the MIN_ENTRIES
         if( left_subset.size() > MIN_ENTRIES && right_subset.size() > MIN_ENTRIES ){
 
-            // good place to use the threads
+            // another good place to use the threads
             Tree *left_subtree  = findBestSplits(df, responseIdx, vars, left_subset);
             Tree *right_subtree = findBestSplits(df, responseIdx, vars, right_subset);
 
@@ -481,7 +480,7 @@ public:
             Tree *t_l = t->left_subtree;
             Tree *t_r = t->right_subtree;
             if( t_l && t_r ){
-                // look ahead for leafs
+                // look ahead for two leafs
                 if( t_l->left_subtree == 0 && t_l->right_subtree == 0 &&
                     t_r->left_subtree == 0 && t_r->right_subtree == 0 ){
                     candsForCollapse.push_back(t);
@@ -494,33 +493,36 @@ public:
                 rssTotal += t->rss;
         }
 
+        // bookkeeping for number of collapses that'll lazily propagate up the tree
+        unordered_map<Tree*,int> tree_size_decrease;
+
         function<bool(Tree*,Tree*)> rssGreaterEq = [](Tree* i, Tree* j){ return i->rss >= j->rss; };
 
         make_heap(candsForCollapse.begin(), candsForCollapse.end(),rssGreaterEq);
 
-// check why candsForCollapse every become empty
         while( rssTotal < alpha * tree->tree_size && tree->tree_size > 1 && !candsForCollapse.empty() ){
             pop_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
             Tree *t = candsForCollapse.back();
             candsForCollapse.pop_back();
-            // collapsing t: chop-off the leafs
+            // rss grows as I reduce model complexity
             rssTotal -= t->left_subtree->rss;
             rssTotal -= t->right_subtree->rss;
+            rssTotal += t->rss;
+            // collapsing t: chop-off the leafs
             delete t->left_subtree;
             t->left_subtree = 0;
             delete t->right_subtree;
             t->right_subtree = 0;
+            tree_size_decrease[t] += 2;
             // leaf value has to become average rather than split point
             t->nodes[0].value.asFloating = t->sum/t->set_size;
-            rssTotal += t->rss;
-            // parent may become a candidate for next collapse
+            // parent may become a candidate for one of the next collapses
             Tree *p = t->parent;
-            if( p->tree_size == 2 ){
-                p->tree_size = 1;
+            tree_size_decrease[p] += tree_size_decrease[t];
+            if( p->tree_size - tree_size_decrease[p] == 2 ){
                 candsForCollapse.push_back(p);
                 push_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
-            } else
-                p->tree_size--;
+            }
         }
 
     }
@@ -646,11 +648,12 @@ DataFrame read1(void){
     // xy <- mvrnorm( 1000000, c(1,2), matrix(c(3,2,2,4),ncol=2) )
     // plot(xy[sample(nrow(xy),10000),], xlab="x", ylab="y", pch=1)
     // write.csv(file="one.csv",x=xy[sample(nrow(xy),10000),])
+    DataFrame df;
     ifstream input("one.csv");
+    if( !input ) return df;
     setSeparators(input);
     readHeader(input,3);
     typedef tuple<string,float,float> Format;
-    DataFrame df;
     Format tmp;
     for(unsigned int row=0; read_tuple(input,tmp); row++){
         tuple<float,float> r12 = make_tuple(
@@ -662,7 +665,9 @@ DataFrame read1(void){
 }
 
 DataFrame read2(void){
+    DataFrame df;
     ifstream input("../trigger/pt/SingleMu_Pt1To1000_FlatRandomOneOverPt.csv");
+    if( !input ) return df;
     setSeparators(input);
     readHeader(input,53);
     typedef tuple<int,float,float,float,int,float,float,float,float,float,float,int,int,int,int,int,int,int,int,int,int,int,int,int,int,
@@ -680,7 +685,6 @@ DataFrame read2(void){
 #define dPhi24_0 21
 #define dPhi24_1 22
 #define muPtGen  1
-    DataFrame df;
     Format tmp;
     for(unsigned int row=0; read_tuple(input,tmp); row++){
         if( get<11>(tmp) == 15 ){
