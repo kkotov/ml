@@ -197,9 +197,10 @@ private:
     vector<Node> nodes; // vectorized tree - canonical representation after I'm done with growing it
 
     // for prunning
-    double rss;
+    double rss, sum, sum2;
+    size_t set_size;
 
-    // pack pointers into a vector, free dynamically allocated memory, strip subsets
+    // pack pointers into a vector, free dynamically allocated memory
     size_t vectorize(vector<Node>& dest) {
         // sanity checks
         //  uninitialized?
@@ -352,7 +353,10 @@ public:
             Tree *retval = new Tree();
             retval->nodes.push_back(leaf);
             retval->tree_size = 1;
-            retval->rss = rss;
+            retval->rss  = rss;
+            retval->sum  = sum;
+            retval->sum2 = sum2;
+            retval->set_size = size;
             return retval;
         }
 
@@ -423,7 +427,10 @@ public:
                 }
 
         Tree *tree = new Tree();
-        tree->rss = rss;
+        tree->rss  = rss;
+        tree->sum  = sum;
+        tree->sum2 = sum2;
+        tree->set_size = size;
 
         // Continue growing tree until any of the subsets are smaller the MIN_ENTRIES
         if( left_subset.size() > MIN_ENTRIES && right_subset.size() > MIN_ENTRIES ){
@@ -461,8 +468,10 @@ public:
     }
 
     // weakest link pruning as prescribed in ESLII p.308
-    void prune(Tree *tree){
-        unordered_map<Tree*,unsigned int> maxHupsToLeaf;
+    void prune(Tree *tree, double alpha){
+        vector<Tree*> candsForCollapse;
+        double rssTotal = 0;
+
         // traverse the tree with local FIFO simulating stack of recursion
         queue<Tree*> fifo;
         fifo.push(tree);
@@ -471,33 +480,49 @@ public:
             fifo.pop();
             Tree *t_l = t->left_subtree;
             Tree *t_r = t->right_subtree;
-            // is leaf?
-            if( t_l==0 && t_r==0 ){
-                maxHupsToLeaf[t] = 0;
-                // climb up the lader of parents
-                size_t hups = 1;
-                for(Tree *p=t->parent; p->parent; p=p->parent,++hups){
-                    unordered_map<Tree*,unsigned int>::iterator tr = maxHupsToLeaf.find(p);
-                    if( tr != maxHupsToLeaf.end() && tr->second<hups )
-                        tr->second = hups;
+            if( t_l && t_r ){
+                // look ahead for leafs
+                if( t_l->left_subtree == 0 && t_l->right_subtree == 0 &&
+                    t_r->left_subtree == 0 && t_r->right_subtree == 0 ){
+                    candsForCollapse.push_back(t);
+                } else {
+                    fifo.push(t_l);
+                    fifo.push(t_r);
                 }
-            } else {
-                fifo.push(t_l);
-                fifo.push(t_r);
             }
+            if( t_l == 0 && t_r == 0 )
+                rssTotal += t->rss;
         }
-        vector<pair<Tree*,int>> orderedNodes(maxHupsToLeaf.size());
-        partial_sort_copy(maxHupsToLeaf.cbegin(),
-                          maxHupsToLeaf.cend(),
-                          orderedNodes.begin(),
-                          orderedNodes.end(),
-                          [](pair<Tree*,unsigned int> i, pair<Tree*,unsigned int> j){ 
-                              return i.second < j.second || ( i.second == j.second && i.first->rss < j.first->rss );
-                          }
-        );
-        
 
-        ;
+        function<bool(Tree*,Tree*)> rssGreaterEq = [](Tree* i, Tree* j){ return i->rss >= j->rss; };
+
+        make_heap(candsForCollapse.begin(), candsForCollapse.end(),rssGreaterEq);
+
+// check why candsForCollapse every become empty
+        while( rssTotal < alpha * tree->tree_size && tree->tree_size > 1 && !candsForCollapse.empty() ){
+            pop_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
+            Tree *t = candsForCollapse.back();
+            candsForCollapse.pop_back();
+            // collapsing t: chop-off the leafs
+            rssTotal -= t->left_subtree->rss;
+            rssTotal -= t->right_subtree->rss;
+            delete t->left_subtree;
+            t->left_subtree = 0;
+            delete t->right_subtree;
+            t->right_subtree = 0;
+            // leaf value has to become average rather than split point
+            t->nodes[0].value.asFloating = t->sum/t->set_size;
+            rssTotal += t->rss;
+            // parent may become a candidate for next collapse
+            Tree *p = t->parent;
+            if( p->tree_size == 2 ){
+                p->tree_size = 1;
+                candsForCollapse.push_back(p);
+                push_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
+            } else
+                p->tree_size--;
+        }
+
     }
 
     vector<Tree> ensemble;
@@ -521,12 +546,13 @@ public:
 //for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
-            prune(tree);
+cout<<tree->tree_size<<endl;
+            prune(tree,10);
             vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
             tree->vectorize(nodes);
             tree->nodes.swap(nodes);
-//tree->save(cout);
+tree->save(cout);
             ensemble.push_back( move(*tree) );
         }
     }
