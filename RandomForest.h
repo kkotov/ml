@@ -37,6 +37,8 @@ private:
     std::unordered_map<long long, size_t> levelCounts; // cached counts for fast impurity calculations
     double gini, crossEntropy; // impurity of dependent variable on training set
     long long majorityVote; // dominant category of the set
+    // below is an alias from one of the metrices above: gini/crossEntropy/rss
+    double metric;
     // number of training entries - entries "seen" by this tree
     size_t set_size;
 
@@ -126,7 +128,10 @@ public:
 
     Tree(void) : parent(0), left_subtree(0), right_subtree(0), tree_size(0), nodes(0),
                  rss(0), sum(0), sum2(0),
-                 levelCounts(), gini(0), crossEntropy(0) {}
+                 levelCounts(), gini(0), crossEntropy(0),
+                 majorityVote(0),
+                 metric(0),
+                 set_size(0) {}
     // tree is an owner of its subtrees
     ~Tree(void){
         if( left_subtree  ) delete left_subtree;
@@ -210,6 +215,7 @@ public:
                 tree->sum2 += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
             }
             tree->rss  = tree->sum2 - tree->sum * tree->sum / size;
+            tree->metric = tree->rss;
         } else {
             // response is Variable::Categorical
             // caclulate general classification characteristics on training events:
@@ -230,6 +236,7 @@ public:
                     tree->majorityVote = c.first;
                 }
             }
+            tree->metric = tree->gini;
         }
 
         // do not grow tree beyond MIN_ENTRIES or less 
@@ -386,7 +393,7 @@ public:
     // weakest link pruning as prescribed in ESLII p.308
     void prune(Tree *tree, double alpha){
         std::vector<Tree*> candsForCollapse;
-        double rssTotal = 0;
+        double metricTotal = 0;
 
         // traverse the tree with local FIFO simulating stack of recursion
         std::queue<Tree*> fifo;
@@ -406,25 +413,26 @@ public:
                     fifo.push(t_r);
                 }
             }
-            if( t_l == 0 && t_r == 0 )
-                rssTotal += t->rss;
+            if( t_l == 0 && t_r == 0 ){
+                metricTotal += t->metric;
+            }
         }
 
         // bookkeeping for number of collapses that'll lazily propagate up the tree
         std::unordered_map<Tree*,int> tree_size_decrease;
 
-        std::function<bool(Tree*,Tree*)> rssGreaterEq = [](Tree* i, Tree* j){ return i->rss >= j->rss; };
+        std::function<bool(Tree*,Tree*)> greaterEq = [](Tree* i, Tree* j){ return i->metric >= j->metric; };
 
-        std::make_heap(candsForCollapse.begin(), candsForCollapse.end(),rssGreaterEq);
+        std::make_heap(candsForCollapse.begin(), candsForCollapse.end(),greaterEq);
 
-        while( rssTotal < alpha * tree->tree_size ){
-            std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
+        while( metricTotal < alpha * tree->tree_size ){
+            std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             Tree *t = candsForCollapse.back();
             candsForCollapse.pop_back();
             // rss grows as I reduce model complexity
-            rssTotal -= t->left_subtree->rss;
-            rssTotal -= t->right_subtree->rss;
-            rssTotal += t->rss;
+            metricTotal -= t->left_subtree->metric;
+            metricTotal -= t->right_subtree->metric;
+            metricTotal += t->metric;
             // collapsing t: chop-off the leafs
             delete t->left_subtree;
             t->left_subtree = 0;
@@ -440,7 +448,7 @@ public:
             tree_size_decrease[p] += tree_size_decrease[t];
             if( p->tree_size - tree_size_decrease[p] == 3 ){
                 candsForCollapse.push_back(p);
-                std::push_heap(candsForCollapse.begin(), candsForCollapse.end(), rssGreaterEq);
+                std::push_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             }
         }
 
