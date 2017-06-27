@@ -32,8 +32,13 @@ private:
     std::vector<Node> nodes; // vectorized tree - packed representation after I'm done with growing it
 
     // regression characteristics for prunning, valid before tree is packed
-    double rss, sum, sum2; // RSS, sum, and sum of squares of dependent variable on training entries
-    size_t set_size; // number of training entries - entries "seen" by this tree
+    double rss, sum, sum2; // RSS, sum, and sum of squares of dependent variable on training set
+    // classification characteristics for prunning, valid before tree is packed
+    std::unordered_map<long long, size_t> levelCounts; // cached counts for fast impurity calculations
+    double gini, crossEntropy; // impurity of dependent variable on training set
+    long long majorityVote; // dominant category of the set
+    // number of training entries - entries "seen" by this tree
+    size_t set_size;
 
     // pack tree into a vector, free dynamically allocated memory, strip auxiliary characteristics
     size_t vectorize(std::vector<Node>& dest) {
@@ -119,7 +124,9 @@ public:
         return true;
     }
 
-    Tree(void) : parent(0), left_subtree(0), right_subtree(0), tree_size(0), nodes(0), rss(0) {}
+    Tree(void) : parent(0), left_subtree(0), right_subtree(0), tree_size(0), nodes(0),
+                 rss(0), sum(0), sum2(0),
+                 levelCounts(), gini(0), crossEntropy(0) {}
     // tree is an owner of its subtrees
     ~Tree(void){
         if( left_subtree  ) delete left_subtree;
@@ -173,44 +180,69 @@ public:
                );
     }
 
-    // thread-safe implementation of CART with gini/entrophy/rms purity metrices
+    // thread-safe implementation of CART with gini/entropy/rms purity metrices
     Tree* findBestSplits(const DataFrame& df,
                          unsigned int responseIdx,
                          const SplitVars& vars,
                          const std::vector<unsigned int>& subset = {}
     ){
-        // safety: nothing to split on? 
-        if( vars.empty() ) return new Tree();
+        Tree *tree = new Tree();
+
+        // safety: nothing to split on? - return an empty tree
+        if( vars.empty() ) return tree;
+
+        size_t size = subset.size();
+        tree->set_size = size;
 
 // criterion to stop growing tree
 #define MIN_ENTRIES 5
 
-        // caclulate general characteristics: RSS, sum, and sum of squares of responces on training events
-        size_t size = subset.size();
-        double sum = 0, sum2 = 0;
-        for(unsigned int i=0; i<size; ++i){
-            unsigned int row = subset[i];
-            sum  += df[row][responseIdx].asFloating;
-            sum2 += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+        if( df.getSchema()[responseIdx] == 1 ){
+            // response is Variable::Continuous
+            // caclulate general regression characteristics on training events:
+            //  RSS, sum, and sum of squares of responces 
+            tree->rss  = 0;
+            tree->sum  = 0;
+            tree->sum2 = 0;
+            for(unsigned int i=0; i<size; ++i){
+                unsigned int row = subset[i];
+                tree->sum  += df[row][responseIdx].asFloating;
+                tree->sum2 += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+            }
+            tree->rss  = tree->sum2 - tree->sum * tree->sum / size;
+        } else {
+            // response is Variable::Categorical
+            // caclulate general classification characteristics on training events:
+            //  gini and cross-entropy
+            tree->gini = 0;
+            tree->crossEntropy = 0;
+            for(unsigned int i=0; i<size; ++i){
+                unsigned int row = subset[i];
+                tree->levelCounts[ df[row][responseIdx].asIntegral ]++;
+            }
+            double maxProb = 0;
+            for(auto c : tree->levelCounts){
+                double p = double(c.second) / size;
+                tree->gini         += p * (1 - p);
+                tree->crossEntropy -= p * log(p);
+                if( maxProb < p ){
+                    maxProb = p;
+                    tree->majorityVote = c.first;
+                }
+            }
         }
-        double rss = sum2 - sum*sum/size;
-
-        // remember the characteristics
-        Tree *tree = new Tree();
-        tree->rss  = rss;
-        tree->sum  = sum;
-        tree->sum2 = sum2;
-        tree->set_size = size;
 
         // do not grow tree beyond MIN_ENTRIES or less 
         if( size <= MIN_ENTRIES ){
-            Tree::Node leaf( sum/size );
-            tree->nodes.push_back(leaf);
+            if( df.getSchema()[responseIdx] == 1 )
+                tree->nodes.push_back( Tree::Node( double(tree->sum/size) ) );
+            else
+                tree->nodes.push_back( Tree::Node( long(tree->majorityVote) ) );
             tree->tree_size = 1; // leaf
             return tree;
         }
 
-        // finding best split in regression is solving Eq 9.13 on p.307 of ESLII
+        // find best split
         size_t bestSplitVar = 0;
         double bestSplitPoint = 0;
         double bestSplitMetric = std::numeric_limits<double>::max();
@@ -224,39 +256,78 @@ public:
                           return df[ subset[i] ][var.first].asFloating < df[ subset[j] ][var.first].asFloating;
                       }
             );
-            // functional form of Eq 9.13 on p.307 of ESLII
-            std::function<double(double,double,size_t,double,double,size_t)> metric =
-                [](double sum_l, double sum2_l, size_t size_l, double sum_r, double sum2_r, size_t size_r){
-                    return (size_l ? (sum2_l - sum_l * sum_l / size_l) : 0) +
-                           (size_r ? (sum2_r - sum_r * sum_r / size_r) : 0);
-                };
-            // start with all points being on one (right) side of the split
-            double sum_r = sum, sum2_r = sum2, sum_l = 0, sum2_l = 0;
-            size_t bestSplitPointSoFar = 0, size_l = 0, size_r = size;
-            double bestMetricSoFar = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
-            // and run over the sorted df representation
-            for(unsigned int index : indices){
-                unsigned int row = subset[index];
-                // advancing the split - moving a point from right to left of the split
-                sum_r  -= df[row][responseIdx].asFloating;
-                sum2_r -= df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
-                sum_l  += df[row][responseIdx].asFloating;
-                sum2_l += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
-                size_r--;
-                size_l++;
-                double newMetric = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
-                if( newMetric < bestMetricSoFar ){
-                    bestMetricSoFar     = newMetric;
-                    bestSplitPointSoFar = row;
+            // regression for continuous case or classification for multilevel
+            if( df.getSchema()[responseIdx] == 1 ){
+                // functional form of Eq 9.13 on p.307 of ESLII
+                std::function<double(double,double,size_t,double,double,size_t)> metric =
+                    [](double sum_l, double sum2_l, size_t size_l, double sum_r, double sum2_r, size_t size_r){
+                        return (size_l ? (sum2_l - sum_l * sum_l / size_l) : 0) +
+                               (size_r ? (sum2_r - sum_r * sum_r / size_r) : 0);
+                    };
+                // start with all points being on one (right) side of the split
+                double sum_r = tree->sum, sum2_r = tree->sum2, sum_l = 0, sum2_l = 0;
+                size_t bestSplitPointSoFar = 0, size_l = 0, size_r = size;
+                double bestMetricSoFar = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
+                // and run over the sorted df representation
+                for(unsigned int index : indices){
+                    unsigned int row = subset[index];
+                    // advancing the split - moving a point from right to left of the split
+                    sum_r  -= df[row][responseIdx].asFloating;
+                    sum2_r -= df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+                    sum_l  += df[row][responseIdx].asFloating;
+                    sum2_l += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
+                    size_r--;
+                    size_l++;
+                    double newMetric = metric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
+                    if( newMetric < bestMetricSoFar ){
+                        bestMetricSoFar     = newMetric;
+                        bestSplitPointSoFar = row;
+                    }
+                }
+                if( bestMetricSoFar < bestSplitMetric ){
+                    bestSplitVar    = var.first;
+                    bestSplitPoint  = df[bestSplitPointSoFar][var.first].asFloating;
+                    bestSplitMetric = bestMetricSoFar;
+                }
+            } else {
+                // functional form for gini index given in Eq 9.17 on p.309 of ESLII
+                std::function<double(const std::unordered_map<long long, size_t>&, size_t,
+                                     const std::unordered_map<long long, size_t>&, size_t)>
+                    metric =
+                      [](const std::unordered_map<long long, size_t>& cnt_l, size_t size_l,
+                         const std::unordered_map<long long, size_t>& cnt_r, size_t size_r){
+                          size_t gini_l = 0;
+                          for(auto c : cnt_l)
+                              gini_l += c.second * (size_l - c.second);
+                          size_t gini_r = 0;
+                          for(auto c : cnt_r)
+                              gini_r += c.second * (size_r - c.second);
+                          return double(gini_l)/size_l/size_l + double(gini_r)/size_r/size_r;
+                      };
+                // start with all points being on one (right) side of the split
+                std::unordered_map<long long, size_t> counts_r( tree->levelCounts ), counts_l;
+                size_t bestSplitPointSoFar = 0, size_l = 0, size_r = size;
+                double bestMetricSoFar = metric(counts_l,size_l,counts_r,size_r);
+                for(unsigned int index : indices){
+                    unsigned int row = subset[index];
+                    // advancing the split - moving a point from right to left of the split
+                    counts_r[ df[row][responseIdx].asIntegral ]--;
+                    counts_l[ df[row][responseIdx].asIntegral ]++;
+                    size_r--;
+                    size_l++;
+                    double newMetric = metric(counts_l,size_l,counts_r,size_r);
+                    if( newMetric < bestMetricSoFar ){
+                        bestMetricSoFar     = newMetric;
+                        bestSplitPointSoFar = row;
+                    }
+                }
+                if( bestMetricSoFar < bestSplitMetric ){
+                    bestSplitVar    = var.first;
+                    bestSplitPoint  = df[bestSplitPointSoFar][var.first].asFloating;
+                    bestSplitMetric = bestMetricSoFar;
                 }
             }
-            if( bestMetricSoFar < bestSplitMetric ){
-                bestSplitVar    = var.first;
-                bestSplitPoint  = df[bestSplitPointSoFar][var.first].asFloating;
-                bestSplitMetric = bestMetricSoFar;
-            }
         }
-
             std::vector<unsigned int> left_subset, right_subset;
             for(unsigned int i : subset)
                 switch(  df[i][bestSplitVar].type ){
@@ -301,9 +372,11 @@ public:
             }
 
         } else {
-            Tree::Node leaf( sum/size );
-            tree->tree_size = 1;
-            tree->nodes.push_back(leaf);
+            if( df.getSchema()[responseIdx] == 1 )
+                tree->nodes.push_back( Tree::Node( double(tree->sum/size) ) );
+            else
+                tree->nodes.push_back( Tree::Node( long(tree->majorityVote) ) );
+            tree->tree_size = 1; // leaf
         }
 #undef MIN_ENTRIES
 
@@ -390,7 +463,7 @@ public:
         rState.seed(0);
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
-            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
+            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, std::floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
 //for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
