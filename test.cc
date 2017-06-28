@@ -110,6 +110,7 @@ DataFrame read1(void){
         );
         df.rbind( DataRow(r12) );
     }
+    df.countAllLevels();
     return df;
 }
 
@@ -153,6 +154,7 @@ DataFrame read2(void){
             df.rbind( DataRow(dPhis) );
         }
     }
+    df.countAllLevels();
     return df;
 }
 
