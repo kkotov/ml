@@ -476,7 +476,7 @@ public:
             std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             Tree *t = candsForCollapse.back();
             candsForCollapse.pop_back();
-            // rss grows as I reduce model complexity
+            // metric (e.g. rss or gini) grows as I reduce model complexity
             metricTotal -= t->left_subtree->metric;
             metricTotal -= t->right_subtree->metric;
             metricTotal += t->metric;
