@@ -286,7 +286,7 @@ public:
             // continuous predictor?
             if( df.getLevels(var.first).size() == 0 ){
 
-                // order training entries (well, their indices) along the candidate variable for the split
+                // order training entries (well, through their indices) along the candidate variable for the split
                 std::vector<unsigned int> indices(size);
                 std::iota(indices.begin(),indices.end(),0);
                 std::sort(indices.begin(),
@@ -419,10 +419,10 @@ public:
             local_root.position = bestSplitVar;
             if( df.getLevels(bestSplitVar).size() == 0 ){
                 local_root.value.type = Variable::Continuous;
-                local_root.value.asFloating = bestSplitPoint;
+                local_root.value.asFloating = df[bestSplitPoint][bestSplitVar].asFloating;
             } else {
                 local_root.value.type = Variable::Categorical;
-                local_root.value.asIntegral = 0; // to be implemented
+                local_root.value.asIntegral = bestSplitPoint;
             }
 
         } else {
