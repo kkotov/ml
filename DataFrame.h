@@ -97,16 +97,16 @@ inline std::ostream& operator<< (std::ostream& out, const DataRow& dr) { return 
 // abstraction for grouping DataRows together
 class DataFrame {
 private:
-    std::vector<unsigned int> schema; // 1 - continuous, >=2 - number of levels in categorical
+    std::vector<std::vector<long>> schema; // levels (empty for continuous columns)
     std::vector<DataRow> rows;
 
 public:
-    const std::vector<unsigned int>& getSchema(void) const { return schema; }
+    const std::vector<std::vector<long>>& getSchema(void) const { return schema; }
     unsigned int nrow(void) const { return rows.size(); }
     unsigned int ncol(void) const { return schema.size(); }
 
     template<typename T>
-    bool cbind(const std::vector<T> &col, unsigned int nLevels=1) {
+    bool cbind(const std::vector<T> &col, std::vector<long> levels={}) {
         // check if number of rows matchs number of elements in column
         if( col.size() != rows.size() && rows.size() != 0 )
             return false;
@@ -117,18 +117,21 @@ public:
             for(unsigned i=0; i<col.size(); ++i)
                 rows[i].data.emplace_back((long long)col[i]);
             // deduce number of levels automatically
-            std::unordered_set<long long> unique;
+            std::unordered_set<long> unique;
             std::copy(col.cbegin(), col.cend(), std::inserter(unique,unique.begin()));
-            // store number of found or provided levels
-            if( nLevels > unique.size() )
-                schema.push_back( nLevels );
-            else
-                schema.push_back( unique.size() );
+            // store found or provided levels
+            if( levels.size() > unique.size() )
+                schema.push_back( levels );
+            else {
+                std::vector<long> tmp(unique.size());
+                std::copy(unique.cbegin(), unique.cend(), tmp.begin());
+                schema.push_back( tmp );
+            }
         } else {
             for(unsigned i=0; i<col.size(); ++i)
                 rows[i].data.emplace_back((double)col[i]);
             // mark the column as continuous
-            schema.push_back(1);
+            schema.push_back(std::vector<long>());
         }
         return true;
     }
@@ -142,20 +145,47 @@ public:
             // initialize the empty DataFrame with the row
             rows.push_back(row);
             std::transform(row.data.cbegin(), row.data.cend(), std::back_inserter(schema),
-                [](const Variable& var){ return (var.type == Variable::Categorical ? 2 : 1) ; }
+                [](const Variable& var){ // consider just two levels, recalculate later
+                    return (var.type == Variable::Categorical ? std::vector<long>(2) : std::vector<long>());
+                }
             );
         } else {
-            // make sure we preserve the schema but do nothing about number of levels assuming it includes the binded
+            // make sure we preserve the schema but do nothing about number of levels yet
             if( !std::equal(row.data.cbegin(), row.data.cend(), schema.cbegin(),
-                     [](const Variable& var, int type){
-                         return (var.type == Variable::Categorical && type >= 2) ||
-                                (var.type == Variable::Continuous  && type == 1) ;
+                     [](const Variable& var, const std::vector<long>& levels){
+                         return (var.type == Variable::Categorical && levels.size() >= 1) ||
+                                (var.type == Variable::Continuous  && levels.empty()) ;
                      }
                  )
             ) return false;
         }
         rows.push_back( std::move(row) );
         return true;
+    }
+
+    void countLevels(unsigned int colidx, std::vector<long> hint={}){
+        // nothing to do for continuous case
+        if( schema[colidx].empty() ) return;
+        // deduce number of levels automatically
+        std::unordered_set<long> unique;
+        std::transform(rows.cbegin(), rows.cend(), std::inserter(unique,unique.begin()),
+            [colidx](const DataRow& row){
+                return row[colidx].asIntegral;
+            }
+        );
+        // store found or provided levels
+        if( hint.size() > unique.size() )
+            schema[colidx] = hint;
+        else {
+            std::vector<long> tmp(unique.size());
+            std::copy(unique.cbegin(), unique.cend(), tmp.begin());
+            schema[colidx] = tmp;
+        }
+    }
+
+    void countAllLevels(void){
+        for(unsigned int colidx=0; colidx<schema.size(); colidx++)
+            countLevels(colidx);
     }
 
           DataRow& operator[](unsigned int i)       { return rows[i]; }
