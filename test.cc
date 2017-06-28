@@ -162,21 +162,26 @@ DataFrame read2(void){
 int main(void){
     RandomForest rf;
 
-    DataFrame df( read2() );
-    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
-    rf.train(df,predictorsIdx,6);
+//    DataFrame df( read2() );
+//    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
+//    rf.train(df,predictorsIdx,6);
 
-//    DataFrame df( read1() );
-//    vector<unsigned int> predictorsIdx = {0};
-//    rf.train(df,predictorsIdx,1);
+    DataFrame df( read1() );
+    vector<unsigned int> predictorsIdx = {0};
+    DataFrame dfTrain, dfTest;
+    for(size_t row=0; row<df.nrow(); row++)
+        if( row%2 ) dfTrain.rbind(df[row]);
+        else        dfTest. rbind(df[row]);
+    df.countAllLevels();
+    rf.train(dfTrain,predictorsIdx,1);
 
 //    rf.ensemble[0].save(cout);
 
     double bias = 0, var = 0;
     long cnt = 0;
-    for(unsigned int row = 0; row>=0 && row < df.nrow(); row++,cnt++){
+    for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++,cnt++){
         double prediction = rf.regress( df[row] );
-        double truth      = df[row][6].asFloating; // 6
+        double truth      = df[row][1].asFloating; // 6
 // cout << df[row] <<endl;
 //        cout << "prediction = "<<prediction <<" truth= "<<truth<<endl;
 //        double prediction = 1./rf.regress( df[row] );

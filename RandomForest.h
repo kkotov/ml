@@ -546,10 +546,10 @@ public:
     void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
         if( df.nrow() < 1 ) return ;
         rState.seed(0);
-        const int nTrees = 1;
+        const int nTrees = 10;
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, std::floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
-//for(auto s : vars) cout << "s.first = "<<s.first << " s.second = "<< s.second << endl;
+//for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 //            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
             prune(tree,0.09);
@@ -557,7 +557,7 @@ public:
             nodes.reserve(tree->tree_size);
             tree->vectorize(nodes);
             tree->nodes.swap(nodes);
-tree->save(std::cout);
+//tree->save(std::cout);
             ensemble.push_back( std::move(*tree) );
         }
     }

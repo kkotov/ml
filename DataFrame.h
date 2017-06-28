@@ -138,7 +138,7 @@ public:
         return true;
     }
 
-    bool rbind(DataRow && row) {
+    bool rbind(const DataRow& row) {
         // check if number of elements in the row agrees with the expectation
         if( row.data.size() != schema.size() && schema.size() > 0 )
             return false;
@@ -161,7 +161,8 @@ public:
                  )
             ) return false;
         }
-        rows.push_back( std::move(row) );
+        //rows.push_back( std::move(row) );
+        rows.push_back(row);
         return true;
     }
 
