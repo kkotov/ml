@@ -72,7 +72,7 @@ private:
             right_subtree = 0;
         }
 
-        // no longer need this variable -> use it to indicate that this tree is already packed
+        // no longer need this variable -> use it to indicate that this tree is already packed in vector
         tree_size = 0;
 
         return size;
@@ -538,7 +538,9 @@ public:
 
         std::make_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
 
+
         while( metricTotal < alpha * tree->tree_size ){
+
             std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             Tree *t = candsForCollapse.back();
             candsForCollapse.pop_back();
@@ -560,8 +562,10 @@ public:
             }
             // collapsing t: chop-off the leafs
             delete t->left_subtree;
+            tree_size_decrease.erase(t->left_subtree);
             t->left_subtree = 0;
             delete t->right_subtree;
+            tree_size_decrease.erase(t->right_subtree);
             t->right_subtree = 0;
             tree_size_decrease[t] += 2;
             // parent may become a candidate for one of the next collapses
@@ -575,19 +579,28 @@ public:
             }
         }
 
-        // pruning can be called multiple times and tree_sizes for whole tree need to be updated
-        //  the accumulated tree reduction is available for all members of candsForCollapse heap
-        //  loop over those and update the tree_size up the parents' ladder
-        for(Tree *t : candsForCollapse){
-            t->tree_size = 3;
-            t->left_subtree->tree_size = 1; 
-            t->right_subtree->tree_size = 1; 
-            // remaining tree is just a stump?
-            if( t->parent == 0 ) return;
-            // climb the ladded of parents
-            for(Tree *p=t->parent; p!=0; p=p->parent)
-                p->tree_size -= tree_size_decrease[t];
+        // pruned tree to just a single node?
+        if( tree->left_subtree == 0 && tree->right_subtree == 0 ){
+            tree->tree_size = 1;
+            return;
         }
+
+        // pruning can be called multiple times and tree_sizes for whole tree need to be updated
+        //  the accumulated tree reduction is available for all members of tree_size_decrease
+        //  loop over those and update the tree_size up the parents' ladder
+        for(std::pair<Tree*,int> t : tree_size_decrease){
+            // don't care for leafs as their immediate parents were already updated anyway
+            if( t.first->left_subtree == 0 && t.first->right_subtree == 0 ){
+                t.first->tree_size = 1;
+                continue;
+            }
+            t.first->tree_size -= t.second;
+            if( t.first->parent == 0 ) continue;
+            // climb the ladded of parents
+            for(Tree *p=t.first->parent; p!=0; p=p->parent)
+                p->tree_size -= t.second;
+        }
+
     }
 
     std::vector<Tree> ensemble;
@@ -627,23 +640,32 @@ public:
         rState.seed(0);
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
-            SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, std::floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
+            SplitVars vars(
+                generateRandomSplitVars(
+                    df.getSchema(),
+                    predictorsIdx,
+                    ( df.getLevels(responseIdx).size() == 0 ?
+                        std::floor(predictorsIdx.size()>15 ? predictorsIdx.size()/3 : 5) :
+                        std::floor( sqrt(predictorsIdx.size()) )
+                    )
+                )
+            );
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
             //k-folds ?
             std::vector<unsigned int> subset = sample(df.nrow(),df.nrow()*0.5);
             Tree *tree = findBestSplits(df, responseIdx, vars, subset);
             std::cout << "metric before: "<< tree->evaluateMetric(df, responseIdx, subset, true)  <<" tree_size before = " << tree->tree_size << std::endl;
-            prune(tree,40);
-            std::cout << "Metric 40: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
-//            prune(tree,100);
-//            std::cout << "Metric 100: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
+            prune(tree,19.885);
+            std::cout << "Metric 19.885: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
+            prune(tree,21);
+            std::cout << "Metric 21: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
 
             std::vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
-            tree->vectorize(nodes);
+          std::cout <<  tree->vectorize(nodes) << std::endl;
             tree->nodes.swap(nodes);
-tree->save(std::cout);
+//tree->save(std::cout);
             ensemble.push_back( std::move(*tree) );
         }
     }
