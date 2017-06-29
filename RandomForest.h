@@ -140,8 +140,7 @@ public:
     // return RSS or Gini metric
     double evaluateMetric(const DataFrame& df,
                           unsigned int responseIdx,
-                          const std::vector<unsigned int>& subset,
-                          bool negateSubset=false)
+                          const std::vector<unsigned int>& subset)
     {
         double metric = std::numeric_limits<double>::max();
         // continuous response else categorical
@@ -653,17 +652,21 @@ public:
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
             //k-folds ?
-            std::vector<unsigned int> subset = sample(df.nrow(),df.nrow()*0.5);
-            Tree *tree = findBestSplits(df, responseIdx, vars, subset);
-            std::cout << "metric before: "<< tree->evaluateMetric(df, responseIdx, subset, true)  <<" tree_size before = " << tree->tree_size << std::endl;
-            prune(tree,19.885);
-            std::cout << "Metric 19.885: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
-            prune(tree,21);
-            std::cout << "Metric 21: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
+            std::vector<unsigned int> s = sample(df.nrow(),df.nrow());
+            std::vector<unsigned int> s1(s.begin(), s.begin()+s.size()/2), s2(s.begin()+s.size()/2,s.end());
+
+            Tree *tree = findBestSplits(df, responseIdx, vars, s1);
+            double rss = tree->evaluateMetric(df, responseIdx, s2);
+
+            for(size_t tree_size = tree->tree_size*3; tree->tree_size>1; tree_size--){
+                double alpha = rss / tree_size;
+                prune(tree,alpha);
+                std::cout << "Metric for "<<alpha<<": " << tree->evaluateMetric(df, responseIdx, s2) << " tree_size = " << tree->tree_size << std::endl;
+            }
 
             std::vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
-          std::cout <<  tree->vectorize(nodes) << std::endl;
+            tree->vectorize(nodes);
             tree->nodes.swap(nodes);
 //tree->save(std::cout);
             ensemble.push_back( std::move(*tree) );
