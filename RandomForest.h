@@ -140,7 +140,8 @@ public:
     // return RSS or Gini metric
     double evaluateMetric(const DataFrame& df,
                           unsigned int responseIdx,
-                          const std::vector<unsigned int>& subset)
+                          const std::vector<unsigned int>& subset,
+                          bool negateSubset=false)
     {
         double metric = std::numeric_limits<double>::max();
         // continuous response else categorical
@@ -574,6 +575,19 @@ public:
             }
         }
 
+        // pruning can be called multiple times and tree_sizes for whole tree need to be updated
+        //  the accumulated tree reduction is available for all members of candsForCollapse heap
+        //  loop over those and update the tree_size up the parents' ladder
+        for(Tree *t : candsForCollapse){
+            t->tree_size = 3;
+            t->left_subtree->tree_size = 1; 
+            t->right_subtree->tree_size = 1; 
+            // remaining tree is just a stump?
+            if( t->parent == 0 ) return;
+            // climb the ladded of parents
+            for(Tree *p=t->parent; p!=0; p=p->parent)
+                p->tree_size -= tree_size_decrease[t];
+        }
     }
 
     std::vector<Tree> ensemble;
@@ -611,22 +625,25 @@ public:
     void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
         if( df.nrow() < 1 ) return ;
         rState.seed(0);
-        const int nTrees = 10;
+        const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, std::floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
-            //k-folds
-            Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
+            //k-folds ?
+            std::vector<unsigned int> subset = sample(df.nrow(),df.nrow()*0.5);
+            Tree *tree = findBestSplits(df, responseIdx, vars, subset);
+            std::cout << "metric before: "<< tree->evaluateMetric(df, responseIdx, subset, true)  <<" tree_size before = " << tree->tree_size << std::endl;
+            prune(tree,40);
+            std::cout << "Metric 40: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
+//            prune(tree,100);
+//            std::cout << "Metric 100: " << tree->evaluateMetric(df, responseIdx, subset, true) << " tree_size = " << tree->tree_size << std::endl;
 
-//            double tree->evaluateMetric(df, responseIdx, );
-
-            prune(tree,0.09);
             std::vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
             tree->vectorize(nodes);
             tree->nodes.swap(nodes);
-//tree->save(std::cout);
+tree->save(std::cout);
             ensemble.push_back( std::move(*tree) );
         }
     }
