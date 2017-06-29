@@ -346,7 +346,7 @@ public:
         for(std::pair<unsigned int,unsigned int> var : vars){
 
             long long bestSplitPointSoFar = 0;
-            double    bestMetricSoFar = std::numeric_limits<double>::max();;
+            double    bestMetricSoFar = std::numeric_limits<double>::max();
 
             // continuous predictor?
             if( df.getLevels(var.first).size() == 0 ){
@@ -651,18 +651,42 @@ public:
             );
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
-            //k-folds ?
-            std::vector<unsigned int> s = sample(df.nrow(),df.nrow());
-            std::vector<unsigned int> s1(s.begin(), s.begin()+s.size()/2), s2(s.begin()+s.size()/2,s.end());
-
-            Tree *tree = findBestSplits(df, responseIdx, vars, s1);
-            double rss = tree->evaluateMetric(df, responseIdx, s2);
-
-            for(size_t tree_size = tree->tree_size*3; tree->tree_size>1; tree_size--){
-                double alpha = rss / tree_size;
-                prune(tree,alpha);
-                std::cout << "Metric for "<<alpha<<": " << tree->evaluateMetric(df, responseIdx, s2) << " tree_size = " << tree->tree_size << std::endl;
+            const size_t nFolds = 30;
+            double alphaMean = 0;
+            std::vector<unsigned int> shuffled = sample(df.nrow(),df.nrow());
+            for(size_t fold=0; fold<nFolds; fold++){
+                std::vector<unsigned int> trainSet, testSet;
+                trainSet.reserve( shuffled.size() );
+                testSet. reserve( shuffled.size() );
+                std::vector<unsigned int>::const_iterator begin = shuffled.cbegin() + (shuffled.size()*fold)/nFolds;
+                std::vector<unsigned int>::const_iterator   end = shuffled.cbegin() + (shuffled.size()*(fold+1))/nFolds;
+                std::copy(shuffled.cbegin(), begin,           std::back_inserter(trainSet));
+                std::copy(end,               shuffled.cend(), std::back_inserter(trainSet));
+                std::copy(begin,             end,             std::back_inserter(testSet));
+                Tree *tree = findBestSplits(df, responseIdx, vars, trainSet);
+                double rss = tree->evaluateMetric(df, responseIdx, testSet);
+                double bestAlpha = 0, bestMetric = std::numeric_limits<double>::max();
+//                size_t bestSize = 0;
+                for(size_t tree_size = tree->tree_size*3; tree->tree_size>1; tree_size--){
+                    double alpha = rss / tree_size;
+                    prune(tree,alpha);
+                    double metric = tree->evaluateMetric(df, responseIdx, testSet);
+                    if( bestMetric > metric ){
+                        bestMetric = metric;
+                        bestAlpha  = alpha;
+//                        bestSize   = tree->tree_size;
+                    }
+                }
+                alphaMean += bestAlpha;
+                delete tree;
+//std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
             }
+            alphaMean /= nFolds;
+
+            Tree *tree = findBestSplits(df, responseIdx, vars, shuffled);
+            prune(tree,alphaMean);
+
+std::cout << "alphaMean=" << alphaMean << " tree_size=" << tree->tree_size << std::endl;
 
             std::vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
