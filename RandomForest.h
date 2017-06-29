@@ -78,35 +78,100 @@ private:
         return size;
     }
 
-public:
-    Variable traverse(const DataRow& row, const Node& root) const {
+    Variable traverseVectorized(const DataRow& row, const Node& root) const {
         // is it a leaf/terminal_node?
         if( root.left_child == 0 && root.right_child == 0 )
             return root.value;
 
         if( root.value.type == Variable::Continuous ){
             if( root.value.asFloating > row[root.position].asFloating )
-                return traverse(row,nodes[root.left_child]);
+                return traverseVectorized(row,nodes[root.left_child]);
             else
-                return traverse(row,nodes[root.right_child]);
+                return traverseVectorized(row,nodes[root.right_child]);
         }
         if( root.value.type == Variable::Categorical ){
             // only binary-level categories are managed
             if( root.value.asIntegral == row[root.position].asIntegral )
-                return traverse(row,nodes[root.left_child]);
+                return traverseVectorized(row,nodes[root.left_child]);
             else
-                return traverse(row,nodes[root.right_child]);
+                return traverseVectorized(row,nodes[root.right_child]);
         }
         // the root is neither Continuous nor Categorical -> error
         return Variable();
     }
+
+    Variable traverse(const DataRow& row, const Tree* root) const {
+        if( root == 0 ) return Variable(); // uninitialized Variable is an error sign
+
+        // is it a leaf/terminal_node?
+        if( root->left_subtree == 0 && root->right_subtree == 0 )
+            return root->nodes[0].value;
+
+        if( root->nodes[0].value.type == Variable::Continuous ){
+            if( root->nodes[0].value.asFloating > row[root->nodes[0].position].asFloating )
+                return traverse(row,root->left_subtree);
+            else
+                return traverse(row,root->right_subtree);
+        }
+        if( root->nodes[0].value.type == Variable::Categorical ){
+            // only binary-level categories are managed
+            if( root->nodes[0].value.asIntegral == row[root->nodes[0].position].asIntegral )
+                return traverse(row,root->left_subtree);
+            else
+                return traverse(row,root->right_subtree);
+        }
+        // the root is neither Continuous nor Categorical -> error
+        return Variable();
+    }
+
+public:
     Variable predict(const DataRow& row) const {
         // is tree initialized? if not return default Variable as a sign of error
         if( nodes.size() == 0 ) return Variable(); 
         // is root node initialized?
         if( nodes[0].value.type == Variable::Unknown ) return Variable(); 
-        // all looks good
-        return traverse(row,nodes[0]);
+        // when tree is vectorized, I set tree_size to 0
+        if( tree_size == 0 )
+            return traverseVectorized(row,nodes[0]);
+        // apparently, tree is not yet vectorized
+        return traverse(row,this);
+    }
+
+    // return RSS or Gini metric
+    double evaluateMetric(const DataFrame& df,
+                          unsigned int responseIdx,
+                          const std::vector<unsigned int>& subset)
+    {
+        double metric = std::numeric_limits<double>::max();
+        // continuous response else categorical
+        if( df.getLevels(responseIdx).size() == 0 ){
+            double bias = 0, variance = 0;
+            for(unsigned int row : subset){
+                Variable p = predict( df[row] );
+                double truth = df[row][responseIdx].asFloating;
+                bias     +=  p.asFloating - truth;
+                variance += (p.asFloating - truth) * (p.asFloating - truth);
+            }
+            metric = variance;
+        } else {
+            std::unordered_map<long long, std::pair<size_t,size_t>> matchMismatch;
+            for(unsigned int row : subset){
+                Variable p = predict( df[row] );
+                long long trueLevel = df[row][responseIdx].asIntegral;
+                if( p.asIntegral == trueLevel )
+                    matchMismatch[ trueLevel ].first++;
+                else
+                    matchMismatch[ trueLevel ].second++;
+            }
+            double gini = 0;
+            for(auto c : matchMismatch){
+                size_t size = c.second.first + c.second.second;
+                double p = double(c.second.first) / size;
+                gini += p * (1 - p);
+            }
+            metric = gini;
+        }
+        return metric;
     }
 
     bool load(std::istream& input){
@@ -550,8 +615,12 @@ public:
         for(unsigned int t=0; t<nTrees; t++){
             SplitVars vars( generateRandomSplitVars( df.getSchema(), predictorsIdx, std::floor(predictorsIdx.size()>15?predictorsIdx.size()/3:5) ) );//(unsigned int)sqrt(predictorsIdx.size()) ) );
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
-//            future<Tree> ft = async(std::launch::async, pickStrongestCuts, df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
+
+            //k-folds
             Tree *tree = findBestSplits(df, responseIdx, vars, sample(df.nrow(),df.nrow()*0.5));
+
+//            double tree->evaluateMetric(df, responseIdx, );
+
             prune(tree,0.09);
             std::vector<Tree::Node> nodes;
             nodes.reserve(tree->tree_size);
