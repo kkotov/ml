@@ -78,6 +78,7 @@ private:
         return size;
     }
 
+    // function that eventually gets invoked by the end-used calling predict
     Variable traverseVectorized(const DataRow& row, const Node& root) const {
         // is it a leaf/terminal_node?
         if( root.left_child == 0 && root.right_child == 0 )
@@ -100,6 +101,7 @@ private:
         return Variable();
     }
 
+    // analogue of the previous function that is handy while tree gets constructed (not vectorized)
     Variable traverse(const DataRow& row, const Tree* root) const {
         if( root == 0 ) return Variable(); // uninitialized Variable is an error sign
 
@@ -122,6 +124,119 @@ private:
         }
         // the root is neither Continuous nor Categorical -> error
         return Variable();
+    }
+
+    // weakest link pruning as prescribed in ESLII p.308
+    void prune(double alpha){
+        std::vector<Tree*> candsForCollapse;
+        double metricTotal = 0;
+
+        // traverse the tree with local FIFO simulating stack of recursion
+        std::queue<Tree*> fifo;
+        fifo.push(this);
+        while( !fifo.empty() ){
+            Tree *t = fifo.front();
+            fifo.pop();
+            Tree *t_l = t->left_subtree;
+            Tree *t_r = t->right_subtree;
+            if( t_l && t_r ){
+                // look ahead for two leafs
+                if( t_l->left_subtree == 0 && t_l->right_subtree == 0 &&
+                    t_r->left_subtree == 0 && t_r->right_subtree == 0 ){
+                    candsForCollapse.push_back(t);
+                } else {
+                    fifo.push(t_l);
+                    fifo.push(t_r);
+                }
+            }
+            if( t_l == 0 && t_r == 0 ){
+                metricTotal += t->metric;
+            }
+        }
+
+        // bookkeeping for number of collapses that'll lazily propagate up the tree
+        // the idea is to take a note of tree size reduction, but not to spend time
+        //  on updating every node yet as most of them won't be touched by pruning
+        // remember the reduction only for the immediate parents of the pruned nodes
+        std::unordered_map<Tree*,int> tree_size_decrease;
+
+        std::function<bool(Tree*,Tree*)> greaterEq = [](Tree* i, Tree* j){ return i->metric >= j->metric; };
+
+        // construct a priority queue out of the vector of candidates for pruning
+        std::make_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
+
+//        double totalSizeDecrease = 0;
+
+        while( metricTotal < alpha * (tree_size /*- totalSizeDecrease*/) ){
+
+            std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
+            Tree *t = candsForCollapse.back();
+            candsForCollapse.pop_back();
+            // metric (e.g. rss or gini) grows as I reduce model complexity
+            metricTotal -= t->left_subtree->metric;
+            metricTotal -= t->right_subtree->metric;
+            metricTotal += t->metric;
+            // new leaf has to become average/majorityVote rather than a split point
+            switch( t->left_subtree->nodes[0].value.type ){
+                case Variable::Continuous:
+                    t->nodes[0].value.type = Variable::Continuous;
+                    t->nodes[0].value.asFloating = t->sum/t->set_size;
+                break;
+                case Variable::Categorical:
+                    t->nodes[0].value.type = Variable::Categorical;
+                    t->nodes[0].value.asIntegral = t->majorityVote;
+                break;
+                default: break;
+            }
+            // collapsing t: chop-off the leafs
+            delete t->left_subtree;
+            tree_size_decrease.erase(t->left_subtree);
+            t->left_subtree = 0;
+            delete t->right_subtree;
+            tree_size_decrease.erase(t->right_subtree);
+            t->right_subtree = 0;
+            tree_size_decrease[t] += 2;
+            // parent may become a candidate for one of the next collapses
+            Tree *p = t->parent;
+            // already at the very top?
+            if( p == 0 ) break;
+            tree_size_decrease[p] += tree_size_decrease[t];
+            if( p->tree_size - tree_size_decrease[p] == 3 ){
+                candsForCollapse.push_back(p);
+                std::push_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
+            }
+
+//            for(std::pair<Tree*,int> t : tree_size_decrease){
+//                // don't care for leafs as their immediate parents were already updated anyway
+//                if( t.first->left_subtree == 0 && t.first->right_subtree == 0 ) continue;
+//                totalSizeDecrease += t.second;
+//            }
+        }
+
+//std::cout << "Total size decrease = " << totalSizeDecrease << std::endl;
+
+        // pruned tree to just a single node?
+        if( left_subtree == 0 && right_subtree == 0 ){
+            tree_size = 1;
+            return;
+        }
+
+        // pruning can be called multiple times and tree_sizes for whole tree need to be updated
+        // the accumulated tree reduction is available for all members of tree_size_decrease
+        //  loop over those and update the tree_size up the parents' ladder
+        for(std::pair<Tree*,int> t : tree_size_decrease){
+            // don't care for leafs as their immediate parents were already updated anyway
+            if( t.first->left_subtree == 0 && t.first->right_subtree == 0 ){
+                t.first->tree_size = 1;
+                continue;
+            }
+            t.first->tree_size -= t.second;
+            if( t.first->parent == 0 ) continue;
+            // climb the ladded of parents
+            for(Tree *p=t.first->parent; p!=0; p=p->parent)
+                p->tree_size -= t.second;
+        }
+
     }
 
 public:
@@ -502,106 +617,6 @@ public:
         return tree;
     }
 
-    // weakest link pruning as prescribed in ESLII p.308
-    void prune(Tree *tree, double alpha){
-        std::vector<Tree*> candsForCollapse;
-        double metricTotal = 0;
-
-        // traverse the tree with local FIFO simulating stack of recursion
-        std::queue<Tree*> fifo;
-        fifo.push(tree);
-        while( !fifo.empty() ){
-            Tree *t = fifo.front();
-            fifo.pop();
-            Tree *t_l = t->left_subtree;
-            Tree *t_r = t->right_subtree;
-            if( t_l && t_r ){
-                // look ahead for two leafs
-                if( t_l->left_subtree == 0 && t_l->right_subtree == 0 &&
-                    t_r->left_subtree == 0 && t_r->right_subtree == 0 ){
-                    candsForCollapse.push_back(t);
-                } else {
-                    fifo.push(t_l);
-                    fifo.push(t_r);
-                }
-            }
-            if( t_l == 0 && t_r == 0 ){
-                metricTotal += t->metric;
-            }
-        }
-
-        // bookkeeping for number of collapses that'll lazily propagate up the tree
-        std::unordered_map<Tree*,int> tree_size_decrease;
-
-        std::function<bool(Tree*,Tree*)> greaterEq = [](Tree* i, Tree* j){ return i->metric >= j->metric; };
-
-        std::make_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
-
-
-        while( metricTotal < alpha * tree->tree_size ){
-
-            std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
-            Tree *t = candsForCollapse.back();
-            candsForCollapse.pop_back();
-            // metric (e.g. rss or gini) grows as I reduce model complexity
-            metricTotal -= t->left_subtree->metric;
-            metricTotal -= t->right_subtree->metric;
-            metricTotal += t->metric;
-            // new leaf has to become average/majorityVote rather than a split point
-            switch( t->left_subtree->nodes[0].value.type ){
-                case Variable::Continuous:
-                    t->nodes[0].value.type = Variable::Continuous;
-                    t->nodes[0].value.asFloating = t->sum/t->set_size;
-                break;
-                case Variable::Categorical:
-                    t->nodes[0].value.type = Variable::Categorical;
-                    t->nodes[0].value.asIntegral = t->majorityVote;
-                break;
-                default: break;
-            }
-            // collapsing t: chop-off the leafs
-            delete t->left_subtree;
-            tree_size_decrease.erase(t->left_subtree);
-            t->left_subtree = 0;
-            delete t->right_subtree;
-            tree_size_decrease.erase(t->right_subtree);
-            t->right_subtree = 0;
-            tree_size_decrease[t] += 2;
-            // parent may become a candidate for one of the next collapses
-            Tree *p = t->parent;
-            // already at the very top?
-            if( p == 0 ) break;
-            tree_size_decrease[p] += tree_size_decrease[t];
-            if( p->tree_size - tree_size_decrease[p] == 3 ){
-                candsForCollapse.push_back(p);
-                std::push_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
-            }
-        }
-
-        // pruned tree to just a single node?
-        if( tree->left_subtree == 0 && tree->right_subtree == 0 ){
-            tree->tree_size = 1;
-            return;
-        }
-
-        // pruning can be called multiple times and tree_sizes for whole tree need to be updated
-        //  the accumulated tree reduction is available for all members of tree_size_decrease
-        //  loop over those and update the tree_size up the parents' ladder
-        for(std::pair<Tree*,int> t : tree_size_decrease){
-            // don't care for leafs as their immediate parents were already updated anyway
-            if( t.first->left_subtree == 0 && t.first->right_subtree == 0 ){
-                t.first->tree_size = 1;
-                continue;
-            }
-            t.first->tree_size -= t.second;
-            if( t.first->parent == 0 ) continue;
-            // climb the ladded of parents
-            for(Tree *p=t.first->parent; p!=0; p=p->parent)
-                p->tree_size -= t.second;
-        }
-
-    }
-
     std::vector<Tree> ensemble;
 
 public:
@@ -636,6 +651,7 @@ public:
 
     void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
         if( df.nrow() < 1 ) return ;
+        // reproducibility
         rState.seed(0);
         const int nTrees = 1;
         for(unsigned int t=0; t<nTrees; t++){
@@ -651,40 +667,43 @@ public:
             );
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
+            // cross-validate models over nFolds, evaluate the best model complexity
             const size_t nFolds = 30;
             double alphaMean = 0;
             std::vector<unsigned int> shuffled = sample(df.nrow(),df.nrow());
             for(size_t fold=0; fold<nFolds; fold++){
-                std::vector<unsigned int> trainSet, testSet;
+                std::vector<unsigned int> trainSet, validSet;
                 trainSet.reserve( shuffled.size() );
-                testSet. reserve( shuffled.size() );
+                validSet.reserve( shuffled.size() );
                 std::vector<unsigned int>::const_iterator begin = shuffled.cbegin() + (shuffled.size()*fold)/nFolds;
                 std::vector<unsigned int>::const_iterator   end = shuffled.cbegin() + (shuffled.size()*(fold+1))/nFolds;
                 std::copy(shuffled.cbegin(), begin,           std::back_inserter(trainSet));
                 std::copy(end,               shuffled.cend(), std::back_inserter(trainSet));
-                std::copy(begin,             end,             std::back_inserter(testSet));
+                std::copy(begin,             end,             std::back_inserter(validSet));
                 Tree *tree = findBestSplits(df, responseIdx, vars, trainSet);
-                double rss = tree->evaluateMetric(df, responseIdx, testSet);
+                double rss = tree->evaluateMetric(df, responseIdx, validSet);
                 double bestAlpha = 0, bestMetric = std::numeric_limits<double>::max();
-//                size_t bestSize = 0;
+                size_t bestSize = 0;
+                // run over alpha hyper-parameter that controls model complexity
                 for(size_t tree_size = tree->tree_size*3; tree->tree_size>1; tree_size--){
                     double alpha = rss / tree_size;
-                    prune(tree,alpha);
-                    double metric = tree->evaluateMetric(df, responseIdx, testSet);
+//std::cout << "Current tree size = " << tree->tree_size << std::endl;
+                    tree->prune(alpha);
+                    double metric = tree->evaluateMetric(df, responseIdx, validSet);
                     if( bestMetric > metric ){
                         bestMetric = metric;
                         bestAlpha  = alpha;
-//                        bestSize   = tree->tree_size;
+                        bestSize   = tree->tree_size;
                     }
                 }
                 alphaMean += bestAlpha;
                 delete tree;
-//std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
+std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
             }
             alphaMean /= nFolds;
 
             Tree *tree = findBestSplits(df, responseIdx, vars, shuffled);
-            prune(tree,alphaMean);
+            tree->prune(alphaMean);
 
 std::cout << "alphaMean=" << alphaMean << " tree_size=" << tree->tree_size << std::endl;
 
