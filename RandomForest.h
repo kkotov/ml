@@ -127,7 +127,12 @@ private:
     }
 
     // weakest link pruning as prescribed in ESLII p.308
-    void prune(double alpha){
+    // remember: alpha can only grow in a series of subsequent calls to prune
+    // return value is the alpha that will result in one more weakest link collapse in the next call
+    double prune(double alpha){
+        // nothing to prune for a single-node tree return the stopping condition (next alpha < 0)
+        if( tree_size == 1 ) return -1;
+
         std::vector<Tree*> candsForCollapse;
         double metricTotal = 0;
 
@@ -165,10 +170,13 @@ private:
         // construct a priority queue out of the vector of candidates for pruning
         std::make_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
 
-//        double totalSizeDecrease = 0;
+        size_t totalSizeDecrease = 0;
+        double costComplexity = metricTotal + alpha * tree_size;
 
-        while( metricTotal < alpha * (tree_size /*- totalSizeDecrease*/) ){
-
+        // collapse nodes until cost-complexity starts growing or there is nothing to collapse
+        while( tree_size - totalSizeDecrease > 1 ){
+std::cout << " prune one " << std::endl;
+            // first, estimate impact of pruning the weakest link on the cost-complexity 
             std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             Tree *t = candsForCollapse.back();
             candsForCollapse.pop_back();
@@ -176,6 +184,14 @@ private:
             metricTotal -= t->left_subtree->metric;
             metricTotal -= t->right_subtree->metric;
             metricTotal += t->metric;
+            // if cost-complexity start growing I prune no more
+            if( costComplexity < metricTotal + alpha * (tree_size - totalSizeDecrease - 2) )
+                break;
+
+            // take a note of the new cost-complexity
+            costComplexity = metricTotal + alpha * (tree_size - totalSizeDecrease - 2);
+
+            // from this point on I go ahead with the pruning and modify the tree
             // new leaf has to become average/majorityVote rather than a split point
             switch( t->left_subtree->nodes[0].value.type ){
                 case Variable::Continuous:
@@ -196,6 +212,7 @@ private:
             tree_size_decrease.erase(t->right_subtree);
             t->right_subtree = 0;
             tree_size_decrease[t] += 2;
+            totalSizeDecrease += 2;
             // parent may become a candidate for one of the next collapses
             Tree *p = t->parent;
             // already at the very top?
@@ -206,19 +223,12 @@ private:
                 std::push_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             }
 
-//            for(std::pair<Tree*,int> t : tree_size_decrease){
-//                // don't care for leafs as their immediate parents were already updated anyway
-//                if( t.first->left_subtree == 0 && t.first->right_subtree == 0 ) continue;
-//                totalSizeDecrease += t.second;
-//            }
         }
-
-//std::cout << "Total size decrease = " << totalSizeDecrease << std::endl;
 
         // pruned tree to just a single node?
         if( left_subtree == 0 && right_subtree == 0 ){
             tree_size = 1;
-            return;
+            return -1; // stopping condition (next alpha < 0)
         }
 
         // pruning can be called multiple times and tree_sizes for whole tree need to be updated
@@ -237,6 +247,9 @@ private:
                 p->tree_size -= t.second;
         }
 
+        // return alpha that will result in one more weakest link collapse in the next round
+        // (note metricTotal was already modified as if next-rounf prunning took place)
+        return (costComplexity - metricTotal) / (tree_size - 2);
     }
 
 public:
@@ -668,7 +681,7 @@ public:
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
             // cross-validate models over nFolds, evaluate the best model complexity
-            const size_t nFolds = 30;
+            const size_t nFolds = 10;
             double alphaMean = 0;
             std::vector<unsigned int> shuffled = sample(df.nrow(),df.nrow());
             for(size_t fold=0; fold<nFolds; fold++){
@@ -681,14 +694,17 @@ public:
                 std::copy(end,               shuffled.cend(), std::back_inserter(trainSet));
                 std::copy(begin,             end,             std::back_inserter(validSet));
                 Tree *tree = findBestSplits(df, responseIdx, vars, trainSet);
-                double rss = tree->evaluateMetric(df, responseIdx, validSet);
                 double bestAlpha = 0, bestMetric = std::numeric_limits<double>::max();
                 size_t bestSize = 0;
                 // run over alpha hyper-parameter that controls model complexity
-                for(size_t tree_size = tree->tree_size*3; tree->tree_size>1; tree_size--){
-                    double alpha = rss / tree_size;
-//std::cout << "Current tree size = " << tree->tree_size << std::endl;
-                    tree->prune(alpha);
+                for(double alpha = 0; alpha>=0; ){
+
+std::cout << "Current tree size = " << tree->tree_size << std::endl;
+
+                    alpha = tree->prune(alpha);
+
+std::cout << " new alpha = " << alpha << std::endl;
+
                     double metric = tree->evaluateMetric(df, responseIdx, validSet);
                     if( bestMetric > metric ){
                         bestMetric = metric;
