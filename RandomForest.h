@@ -55,6 +55,8 @@ private:
 
         // pre-order traversal
         dest.push_back(nodes[0]);
+        // dest must have enough elements reserved otherwise one of the
+        //  push_backs will invalidate local_root refs up the recursion chain
         Node& local_root = dest.back();
 
         size_t size = 1;
@@ -121,9 +123,9 @@ private:
 
     // weakest link pruning as prescribed in ESLII p.308
     //  I prune tree to a single node and return a series of intermediate/nested trees (pointers)
-    //  decreasing in size by a single node collapse;
-    //  each tree indexed by the alpha that would lead to the tree in cost-complexity
-    //  optimization would I start with initial tree and this alpha
+    //  each tree is a single node collapse smaller than the predecessor;
+    //  trees are indexed by the alphas that would yeld these trees in cost-complexity
+    //  optimization would I start with initial tree and the alphas
     std::map<double,std::shared_ptr<Tree>> prune(void){
 
         std::map<double,std::shared_ptr<Tree>> retval;
@@ -239,7 +241,7 @@ private:
             tree_size = 1;
             return retval;
         }
-
+/*
         // pruning can be called multiple times and tree_sizes for whole tree need to be updated
         // the accumulated tree reduction is available for all members of tree_size_decrease
         //  loop over those and update the tree_size up the parents' ladder
@@ -255,8 +257,7 @@ private:
             for(Tree *p=t.first->parent; p!=0; p=p->parent)
                 p->tree_size -= t.second;
         }
-
-        // return alpha that will result in one more weakest link collapse in the next round
+*/
         return retval;
     }
 
@@ -703,37 +704,32 @@ public:
                 std::copy(begin,             end,             std::back_inserter(validSet));
                 Tree *tree = findBestSplits(df, responseIdx, vars, trainSet);
                 double bestAlpha = 0, bestMetric = std::numeric_limits<double>::max();
-                size_t bestSize = 0;
                 std::map<double,std::shared_ptr<Tree>> nested_trees = tree->prune();
                 // run over alpha hyper-parameter that controls model complexity
                 for(auto tr : nested_trees){
                     double alpha = tr.first;
                     std::shared_ptr<Tree> tree = tr.second;
                     double metric = tree->evaluateMetric(df, responseIdx, validSet);
+//std::cout << "alpha=" << alpha << " tree_size=" << tree->nodes.size() << " metric=" << metric << std::endl;
                     if( bestMetric > metric ){
                         bestMetric = metric;
                         bestAlpha  = alpha;
-                        bestSize   = tree->tree_size;
                     }
                 }
                 alphaMean += bestAlpha;
                 delete tree;
-std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
+//std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
             }
             alphaMean /= nFolds;
 
             Tree *tree = findBestSplits(df, responseIdx, vars, shuffled);
-/*            tree->prune(alphaMean);
+            std::map<double,std::shared_ptr<Tree>> models = tree->prune();
+            auto model = models.lower_bound(alphaMean);
+//std::cout << "alphaMean=" << alphaMean << " closest= " << model->first << std::endl;
 
-std::cout << "alphaMean=" << alphaMean << " tree_size=" << tree->tree_size << std::endl;
-
-            std::vector<Tree::Node> nodes;
-            nodes.reserve(tree->tree_size);
-            tree->vectorize(nodes);
-            tree->nodes.swap(nodes);
 //tree->save(std::cout);
-            ensemble.push_back( std::move(*tree) );
-*/        }
+            ensemble.push_back( std::move(*(model->second)) );
+        }
     }
 
     RandomForest(void){}
