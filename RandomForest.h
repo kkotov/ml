@@ -1,6 +1,7 @@
 #ifndef RandomForest_h
 #define RandomForest_h
 
+#include <map>
 #include <list>
 #include <queue>
 #include <vector>
@@ -10,6 +11,7 @@
 #include <utility>
 #include <random>
 #include <limits>
+#include <memory>
 #include <unordered_map>
 
 #include "DataFrame.h"
@@ -42,7 +44,7 @@ private:
     // number of training entries - entries "seen" by this tree
     size_t set_size;
 
-    // pack tree into a vector, free dynamically allocated memory, strip auxiliary characteristics
+    // pack tree into a vector
     size_t vectorize(std::vector<Node>& dest) {
         // sanity checks
         //  uninitialized?
@@ -50,8 +52,6 @@ private:
         //  broken invariant (either vectorized or both subtrees present)?
         if( ( left_subtree == 0 && right_subtree != 0 ) ||
             ( left_subtree != 0 && right_subtree == 0 ) ) return 0;
-        // already vectorized?
-        if( tree_size == 0 ) return 0;
 
         // pre-order traversal
         dest.push_back(nodes[0]);
@@ -63,17 +63,10 @@ private:
         if( left_subtree != 0 && right_subtree != 0 ){
             local_root.left_child  = dest.size();
             size += left_subtree->vectorize(dest);
-            delete left_subtree;
-            left_subtree = 0;
 
             local_root.right_child = dest.size();
             size += right_subtree->vectorize(dest);
-            delete right_subtree;
-            right_subtree = 0;
         }
-
-        // no longer need this variable -> use it to indicate that this tree is already packed in vector
-        tree_size = 0;
 
         return size;
     }
@@ -127,11 +120,16 @@ private:
     }
 
     // weakest link pruning as prescribed in ESLII p.308
-    // remember: alpha can only grow in a series of subsequent calls to prune
-    // return value is the alpha that will result in one more weakest link collapse in the next call
-    double prune(double alpha){
-        // nothing to prune for a single-node tree return the stopping condition (next alpha < 0)
-        if( tree_size == 1 ) return -1;
+    //  I prune tree to a single node and return a series of intermediate/nested trees (pointers)
+    //  decreasing in size by a single node collapse;
+    //  each tree indexed by the alpha that would lead to the tree in cost-complexity
+    //  optimization would I start with initial tree and this alpha
+    std::map<double,std::shared_ptr<Tree>> prune(void){
+
+        std::map<double,std::shared_ptr<Tree>> retval;
+
+        // nothing to prune for a single-node tree return empty set
+        if( tree_size == 1 ) return retval;
 
         std::vector<Tree*> candsForCollapse;
         double metricTotal = 0;
@@ -162,20 +160,31 @@ private:
         // bookkeeping for number of collapses that'll lazily propagate up the tree
         // the idea is to take a note of tree size reduction, but not to spend time
         //  on updating every node yet as most of them won't be touched by pruning
-        // remember the reduction only for the immediate parents of the pruned nodes
+        // (reduction only for the immediate parents of the pruned nodes is remembered)
         std::unordered_map<Tree*,int> tree_size_decrease;
 
-        std::function<bool(Tree*,Tree*)> greaterEq = [](Tree* i, Tree* j){ return i->metric >= j->metric; };
+        // "weakest link pruning: we successively collapse the internal node that
+        //  produces the smallest per-node increase in ..."
+        std::function<bool(Tree*,Tree*)> greaterEq = [](Tree* i, Tree* j){
+            return i->metric - i->left_subtree->metric - i->right_subtree->metric >=
+                   j->metric - j->left_subtree->metric - j->right_subtree->metric ;
+        };
 
         // construct a priority queue out of the vector of candidates for pruning
         std::make_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
 
         size_t totalSizeDecrease = 0;
-        double costComplexity = metricTotal + alpha * tree_size;
+        double alpha = 0;
 
-        // collapse nodes until cost-complexity starts growing or there is nothing to collapse
+        // for completenes store also the current unchanged tree (alpha = 0)
+        std::shared_ptr<Tree> tree0(new Tree());
+        tree0->nodes.reserve(tree_size);
+        vectorize(tree0->nodes);
+        retval[0] = tree0;
+
+        // collapse nodes until there is nothing to collapse
         while( tree_size - totalSizeDecrease > 1 ){
-std::cout << " prune one " << std::endl;
+
             // first, estimate impact of pruning the weakest link on the cost-complexity 
             std::pop_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             Tree *t = candsForCollapse.back();
@@ -184,14 +193,10 @@ std::cout << " prune one " << std::endl;
             metricTotal -= t->left_subtree->metric;
             metricTotal -= t->right_subtree->metric;
             metricTotal += t->metric;
-            // if cost-complexity start growing I prune no more
-            if( costComplexity < metricTotal + alpha * (tree_size - totalSizeDecrease - 2) )
-                break;
 
-            // take a note of the new cost-complexity
-            costComplexity = metricTotal + alpha * (tree_size - totalSizeDecrease - 2);
+            // by how much alpha should increase to balance the increase in metric
+            alpha += (t->metric - t->left_subtree->metric - t->right_subtree->metric)/2.;
 
-            // from this point on I go ahead with the pruning and modify the tree
             // new leaf has to become average/majorityVote rather than a split point
             switch( t->left_subtree->nodes[0].value.type ){
                 case Variable::Continuous:
@@ -223,12 +228,16 @@ std::cout << " prune one " << std::endl;
                 std::push_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
             }
 
+            std::shared_ptr<Tree> treeAlpha(new Tree());
+            treeAlpha->nodes.reserve(tree_size-totalSizeDecrease);
+            vectorize(treeAlpha->nodes);
+            retval[alpha] = treeAlpha;
         }
 
         // pruned tree to just a single node?
         if( left_subtree == 0 && right_subtree == 0 ){
             tree_size = 1;
-            return -1; // stopping condition (next alpha < 0)
+            return retval;
         }
 
         // pruning can be called multiple times and tree_sizes for whole tree need to be updated
@@ -248,8 +257,7 @@ std::cout << " prune one " << std::endl;
         }
 
         // return alpha that will result in one more weakest link collapse in the next round
-        // (note metricTotal was already modified as if next-rounf prunning took place)
-        return (costComplexity - metricTotal) / (tree_size - 2);
+        return retval;
     }
 
 public:
@@ -696,15 +704,11 @@ public:
                 Tree *tree = findBestSplits(df, responseIdx, vars, trainSet);
                 double bestAlpha = 0, bestMetric = std::numeric_limits<double>::max();
                 size_t bestSize = 0;
+                std::map<double,std::shared_ptr<Tree>> nested_trees = tree->prune();
                 // run over alpha hyper-parameter that controls model complexity
-                for(double alpha = 0; alpha>=0; ){
-
-std::cout << "Current tree size = " << tree->tree_size << std::endl;
-
-                    alpha = tree->prune(alpha);
-
-std::cout << " new alpha = " << alpha << std::endl;
-
+                for(auto tr : nested_trees){
+                    double alpha = tr.first;
+                    std::shared_ptr<Tree> tree = tr.second;
                     double metric = tree->evaluateMetric(df, responseIdx, validSet);
                     if( bestMetric > metric ){
                         bestMetric = metric;
@@ -719,7 +723,7 @@ std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
             alphaMean /= nFolds;
 
             Tree *tree = findBestSplits(df, responseIdx, vars, shuffled);
-            tree->prune(alphaMean);
+/*            tree->prune(alphaMean);
 
 std::cout << "alphaMean=" << alphaMean << " tree_size=" << tree->tree_size << std::endl;
 
@@ -729,7 +733,7 @@ std::cout << "alphaMean=" << alphaMean << " tree_size=" << tree->tree_size << st
             tree->nodes.swap(nodes);
 //tree->save(std::cout);
             ensemble.push_back( std::move(*tree) );
-        }
+*/        }
     }
 
     RandomForest(void){}
