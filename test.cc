@@ -13,30 +13,6 @@
 
 using namespace std;
 
-DataFrame oneHOTencode(const vector<int> &col, unordered_set<int> levels = {}, bool nMinusOne = true){
-    DataFrame df;
-    // if levels are not provided, deduce them; provided two - check
-    if( levels.size() <= 2 ){
-        levels.clear();
-        copy(col.cbegin(), col.cend(), inserter(levels,levels.begin()));
-    }
-    // do nothing for binary levels
-    if( levels.size() == 2 ){
-        df.cbind(col);
-        return df;
-    }
-    // encode
-    for(auto l: levels){
-        // N-1 levels? - make 0th level - all zeros
-        if( nMinusOne && l == *levels.begin() ) continue;
-        // turn each level into a binary match/mismatch column
-        vector<char> binary( col.size() );
-        transform(col.cbegin(), col.cend(), binary.begin(), [&l] (int i){ return i==l; } );
-        df.cbind(binary);
-    }
-    return df;
-}
-
 template<int IDX, int NMAX, typename... Args>
 struct READ_TUPLE {
     static bool read(istream &in, tuple<Args...> &t){
@@ -160,7 +136,6 @@ DataFrame read2(void){
 
 
 int main(void){
-    RandomForest rf;
 
 //    DataFrame df( read2() );
 //    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
@@ -173,6 +148,8 @@ int main(void){
         if( row%2 ) dfTrain.rbind(df[row]);
         else        dfTest. rbind(df[row]);
     df.countAllLevels();
+
+    RandomForest rf;
     rf.train(dfTrain,predictorsIdx,1);
 
 //    rf.ensemble[0].save(cout);

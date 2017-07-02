@@ -24,7 +24,7 @@ private:
         explicit Node(long   v) : value((long long) v), position(0), left_child(0), right_child(0){}
     };
 
-    friend class RandomForest;
+    friend class TreeTrainer;
 
     Tree *parent, *left_subtree, *right_subtree; // temporary, used before I pack nodes in a vector
     size_t tree_size; // 1 + sizeof(left_subtree) + sizeof(right_subtree), valid only until tree is packed
