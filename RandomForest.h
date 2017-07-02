@@ -689,11 +689,14 @@ public:
             );
 //for(auto s : vars) std::cout << "s.first = "<<s.first << " s.second = "<< s.second << std::endl;
 
-            // cross-validate models over nFolds, evaluate the best model complexity
+            // cross-validate models over nFolds for evaluating the best model complexity
             const size_t nFolds = 10;
-            double alphaMean = 0;
+            std::vector<double> alphas[nFolds]; // series of hyper-parameter for each fold
+            std::vector<std::shared_ptr<Tree>> models[nFolds]; // series of corresponding models for each fold
+            std::vector<double> outOfSampleError[nFolds]; // OOB error estimate
             std::vector<unsigned int> shuffled = sample(df.nrow(),df.nrow());
             for(size_t fold=0; fold<nFolds; fold++){
+                // partition into training and validation sets
                 std::vector<unsigned int> trainSet, validSet;
                 trainSet.reserve( shuffled.size() );
                 validSet.reserve( shuffled.size() );
@@ -702,32 +705,85 @@ public:
                 std::copy(shuffled.cbegin(), begin,           std::back_inserter(trainSet));
                 std::copy(end,               shuffled.cend(), std::back_inserter(trainSet));
                 std::copy(begin,             end,             std::back_inserter(validSet));
+                // get the tree
                 Tree *tree = findBestSplits(df, responseIdx, vars, trainSet);
-                double bestAlpha = 0, bestMetric = std::numeric_limits<double>::max();
-                std::map<double,std::shared_ptr<Tree>> nested_trees = tree->prune();
-                // run over alpha hyper-parameter that controls model complexity
-                for(auto tr : nested_trees){
-                    double alpha = tr.first;
-                    std::shared_ptr<Tree> tree = tr.second;
-                    double metric = tree->evaluateMetric(df, responseIdx, validSet);
-//std::cout << "alpha=" << alpha << " tree_size=" << tree->nodes.size() << " metric=" << metric << std::endl;
-                    if( bestMetric > metric ){
-                        bestMetric = metric;
-                        bestAlpha  = alpha;
+                // and prune it
+                std::map<double,std::shared_ptr<Tree>> m = tree->prune();
+                alphas[fold].reserve( m.size() );
+                models[fold].reserve( m.size() );
+                outOfSampleError[fold].reserve( m.size() );
+                // remember
+                //  hyper-parameters
+                std::transform(m.cbegin(),
+                               m.cend(),
+                               std::back_inserter(alphas[fold]),
+                               [](std::pair<double,std::shared_ptr<Tree>> a){
+                                   return a.first;
+                               }
+                );
+                //  corresponding models
+                std::transform(m.cbegin(),
+                               m.cend(),
+                               std::back_inserter(models[fold]),
+                               [](std::pair<double,std::shared_ptr<Tree>> a){ 
+                                   return a.second;
+                               }
+                );
+                //  and their out-of-sample errors
+                std::transform(m.cbegin(),
+                               m.cend(),
+                               std::back_inserter(outOfSampleError[fold]),
+                               [&df, &responseIdx, &validSet](std::pair<double,std::shared_ptr<Tree>> a){
+                                   return a.second->evaluateMetric(df, responseIdx, validSet);
+                               }
+                );
+            }
+
+            // among different model complexities pick one
+            //  "...to minimize the average error." (slide #20 of 08-trees-handout.pdf of StatLearn)
+            std::map<double,double> averageError;
+            // run over alpha hyper-parameter that controls model complexity
+            size_t pos[nFolds] = {};
+            while(1){
+                // find fold holding the next smallest alpha
+                double nextAlpha = std::numeric_limits<double>::max();
+                int nextFold = -1;
+                for(size_t fold=0; fold<nFolds; fold++){
+                    if( pos[fold] == alphas[fold].size() - 1 ) continue;
+                    if( nextAlpha > alphas[fold][ pos[fold] + 1 ] ){
+                        nextAlpha = alphas[fold][ pos[fold] + 1 ]; 
+                        nextFold  = fold;
                     }
                 }
-                alphaMean += bestAlpha;
-                delete tree;
-//std::cout << "bestAlpha=" << bestAlpha << " bestSize=" << bestSize << std::endl;
+                // no more alphas remain
+                if( nextFold < 0 ) break;
+
+                pos[nextFold]++;
+
+                double aveErr = 0;
+                for(size_t fold=0; fold<nFolds; fold++)
+                    aveErr += outOfSampleError[fold][ pos[fold] ];
+                aveErr /= nFolds;
+
+                averageError.insert(std::make_pair(nextAlpha,aveErr));
             }
-            alphaMean /= nFolds;
+
+            std::map<double,double>::const_iterator it =
+                std::min_element(averageError.begin(),
+                                 averageError.end(),
+                                 [](std::pair<double,double> a, std::pair<double,double> b){
+                                     return a.second < b.second;
+                                 }
+                );
+
+            double bestAlpha = it->first;
+std::cout << "bestAlpha=" << bestAlpha << std::endl;
 
             Tree *tree = findBestSplits(df, responseIdx, vars, shuffled);
-            std::map<double,std::shared_ptr<Tree>> models = tree->prune();
-            auto model = models.lower_bound(alphaMean);
-//std::cout << "alphaMean=" << alphaMean << " closest= " << model->first << std::endl;
+            std::map<double,std::shared_ptr<Tree>> m = tree->prune();
+            auto model = m.lower_bound(bestAlpha);
 
-//tree->save(std::cout);
+//model->second->save(std::cout);
             ensemble.push_back( std::move(*(model->second)) );
         }
     }
