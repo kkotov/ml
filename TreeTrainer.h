@@ -365,7 +365,8 @@ public:
             // get the tree
             Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, trainSet, false);
             // and prune it
-            std::map<double,std::shared_ptr<Tree>> m = tree->prune();
+            std::map<double,std::shared_ptr<Tree>> m = tree->prune(); // guaranteed to create a new tree
+            delete tree;
             alphas[fold].reserve( m.size() );
             models[fold].reserve( m.size() );
             outOfSampleError[fold].reserve( m.size() );
@@ -437,6 +438,7 @@ public:
 
         Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, shuffled, false);
         std::map<double,std::shared_ptr<Tree>> m = tree->prune();
+        delete tree;
         auto model = m.lower_bound(bestAlpha);
 
         return model->second;
@@ -446,15 +448,17 @@ public:
         // reproducibility
         rState.seed(seed);
 
-        std::vector<std::shared_ptr<Tree>> ensemble;
-
-        const int nTrees = 1;
+        const int nTrees = 100;
+        std::vector<std::shared_ptr<Tree>> ensemble(nTrees);
         for(unsigned int t=0; t<nTrees; t++){
-
+            std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.66);
+            std::shared_ptr<Tree> tree( new Tree() );
+            Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, true);
+            tree->nodes.reserve(tr->tree_size);
+            tr->vectorize(tree->nodes);
+            delete tr;
+            ensemble[t] = tree;
         }
-
-//model->second->save(std::cout);
-//        ensemble.push_back( std::move(*()) );
 
         return ensemble;
     }
