@@ -91,6 +91,36 @@ DataFrame read1(void){
 }
 
 DataFrame read2(void){
+    // require(MASS)
+    // xyz <- mvrnorm( 1000000, c(0,0,0), matrix(c(1,0.7,0.5,0.7,1,0.7,0.5,0.7,1),ncol=3) )
+    // plot(xyz[sample(nrow(xyz),10000),c(1,3)], xlab="x", ylab="y", pch=1)
+    // write.csv(file="two.csv",x=xyz[sample(nrow(xyz),10000),])
+    DataFrame df;
+    ifstream input("two.csv");
+    if( !input ) return df;
+    setSeparators(input);
+    readHeader(input,4);
+    typedef tuple<string,float,float,string> Format;
+    Format tmp;
+    for(unsigned int row=0; read_tuple(input,tmp); row++){
+        string level = get<3>(tmp);
+        // strip quotes
+        replace(level.begin(),level.end(),'\"',' ');
+        tuple<float,float,int> r123 = make_tuple(
+                get<1>(tmp), get<2>(tmp), stoi(level)
+        );
+        df.rbind( DataRow(r123) );
+    }
+    df.countAllLevels();
+//    cout << "Found " << df.getLevels(2).size() << " levels:" << endl;
+//    copy(df.getLevels(2).cbegin(),df.getLevels(2).cend(),ostream_iterator<int>(cout," "));
+//    cout << endl;
+    return df;
+}
+
+
+
+DataFrame readUltimate(void){
     DataFrame df;
     ifstream input("../trigger/pt/SingleMu_Pt1To1000_FlatRandomOneOverPt.csv");
     if( !input ) return df;
@@ -141,34 +171,46 @@ int main(void){
 //    vector<unsigned int> predictorsIdx = {0,1,2,3,4,5};
 //    rf.train(df,predictorsIdx,6);
 
-    DataFrame df( read1() );
-    vector<unsigned int> predictorsIdx = {0};
+    DataFrame df( read2() );
     DataFrame dfTrain, dfTest;
     for(size_t row=0; row<df.nrow(); row++)
         if( row%2 ) dfTrain.rbind(df[row]);
         else        dfTest. rbind(df[row]);
-    df.countAllLevels();
+    dfTrain.countAllLevels();
+    dfTest .countAllLevels();
 
     RandomForest rf;
-    rf.train(dfTrain,predictorsIdx,1);
+    vector<unsigned int> predictorsIdx = {0,1};
+    unsigned int responseIdx = 2;
+    rf.train(dfTrain,predictorsIdx,responseIdx);
 
-//    rf.ensemble[0].save(cout);
-
-    double bias = 0, var = 0;
-    long cnt = 0;
-    for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++,cnt++){
-        double prediction = rf.regress( df[row] );
-        double truth      = df[row][1].asFloating; // 6
-// cout << df[row] <<endl;
-//        cout << "prediction = "<<prediction <<" truth= "<<truth<<endl;
-//        double prediction = 1./rf.regress( df[row] );
-//        double truth      = 1./df[row][6].asFloating;
-        bias +=  prediction - truth;
-        var  += (prediction - truth) * (prediction - truth);
+    // benchmarking regression of classification?
+    if( df.getLevels(responseIdx).size() == 0 ){
+        double bias = 0, var = 0;
+        long cnt = 0;
+        for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++,cnt++){
+            double prediction = rf.regress( df[row] );
+            double truth      = df[row][responseIdx].asFloating;
+            bias +=  prediction - truth;
+            var  += (prediction - truth) * (prediction - truth);
+        }
+        double sd = sqrt((var - bias*bias/cnt)/(cnt - 1));
+        bias /= cnt;
+        cout << "bias = "<< bias << " sd = " << sd << " # events = " << cnt << endl;
+    } else {
+        map<long,map<long,unsigned int>> confusionMatrix;
+        for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++){
+            long prediction = rf.classify( df[row] );
+            long truth      = df[row][responseIdx].asIntegral;
+            confusionMatrix[prediction][truth]++;
+        }
+        for(pair<const long,map<long,unsigned int>>& row : confusionMatrix){
+            cout << row.first << ": " ;
+            for(pair<const long,unsigned int> value : row.second)
+                    cout << value.second <<", ";
+            cout << endl;
+        }
     }
-    double sd = sqrt((var - bias*bias/cnt)/(cnt - 1));
-    bias /= cnt;
-    cout << "bias = "<< bias << " sd = " << sd << endl;
 
     return 0;
 }

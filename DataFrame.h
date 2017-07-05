@@ -102,7 +102,7 @@ private:
 
 public:
     const std::vector<std::vector<long>>& getSchema(void) const { return schema; }
-    std::vector<long> getLevels(unsigned int colidx) const { return schema[colidx]; }
+    const std::vector<long>& getLevels(unsigned int colidx) const { return schema[colidx]; }
 
     unsigned int nrow(void) const { return rows.size(); }
     unsigned int ncol(void) const { return schema.size(); }

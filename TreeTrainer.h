@@ -18,7 +18,7 @@
 
 class TreeTrainer {
 private:
-    typedef std::list<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level (if categorical)
+    typedef std::list<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level index (if categorical)
 
     std::default_random_engine rState;
 
@@ -171,8 +171,8 @@ private:
                     vars.push_back(std::make_pair(idx,0));
                 else {
                     // one-HOT encoding
-                    for(long level : df.getLevels(idx))
-                        vars.push_back(std::make_pair(idx,level));
+                    for(unsigned int levelIdx = 0; levelIdx < df.getLevels(idx).size(); ++levelIdx)
+                        vars.push_back(std::make_pair(idx,levelIdx));
                 }
             }
         }
