@@ -96,25 +96,27 @@ DataFrame read2(void){
     // plot(xyz[sample(nrow(xyz),10000),c(1,3)], xlab="x", ylab="y", pch=1)
     // write.csv(file="two.csv",x=xyz[sample(nrow(xyz),10000),])
     DataFrame df;
-    ifstream input("two.csv");
+    ifstream input("three.csv");
     if( !input ) return df;
     setSeparators(input);
     readHeader(input,4);
-    typedef tuple<string,float,float,string> Format;
+    typedef tuple<string,float,string,string> Format;
     Format tmp;
     for(unsigned int row=0; read_tuple(input,tmp); row++){
-        string level = get<3>(tmp);
+        string level1 = get<3>(tmp);
+        string level2 = get<2>(tmp);
         // strip quotes
-        replace(level.begin(),level.end(),'\"',' ');
-        tuple<float,float,int> r123 = make_tuple(
-                get<1>(tmp), get<2>(tmp), stoi(level)
+        replace(level1.begin(),level1.end(),'\"',' ');
+        replace(level2.begin(),level2.end(),'\"',' ');
+        tuple<float,int,int> r123 = make_tuple(
+                get<1>(tmp), stoi(level1), stoi(level2)
         );
         df.rbind( DataRow(r123) );
     }
     df.countAllLevels();
-//    cout << "Found " << df.getLevels(2).size() << " levels:" << endl;
-//    copy(df.getLevels(2).cbegin(),df.getLevels(2).cend(),ostream_iterator<int>(cout," "));
-//    cout << endl;
+    cout << "Found " << df.getLevels(1).size() << " levels:" << endl;
+    copy(df.getLevels(1).cbegin(),df.getLevels(1).cend(),ostream_iterator<int>(cout," "));
+    cout << endl;
     return df;
 }
 
