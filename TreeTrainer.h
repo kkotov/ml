@@ -150,8 +150,8 @@ private:
                        size_t gini_r = 0;
                        for(auto c : cnt_r)
                            gini_r += c.second * (size_r - c.second);
-                       return (size_l ? double(gini_l)/size_l/size_l : 0) +
-                              (size_r ? double(gini_r)/size_r/size_r : 0);
+                       return (size_l ? double(gini_l)/size_l : 0) +
+                              (size_r ? double(gini_r)/size_r : 0);
                 };
 
         // the only Random-Forest specific step here: draw a random subset of predictors
@@ -451,7 +451,7 @@ public:
         const int nTrees = 100;
         std::vector<std::shared_ptr<Tree>> ensemble(nTrees);
         for(unsigned int t=0; t<nTrees; t++){
-            std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.66);
+            std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.5);
             std::shared_ptr<Tree> tree( new Tree() );
             Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, true);
             tree->nodes.reserve(tr->tree_size);

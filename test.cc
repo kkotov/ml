@@ -184,6 +184,19 @@ int main(void){
     unsigned int responseIdx = 2;
     rf.train(dfTrain,predictorsIdx,responseIdx);
 
+/*
+    TreeTrainer tt;
+    std::vector<unsigned int> shuffled = tt.sample(df.nrow(),df.nrow());
+    Tree *tr = tt.findBestSplits(df, responseIdx, predictorsIdx, shuffled, false);
+    Tree *tree = new Tree();
+    tree->nodes.reserve(tr->tree_size);
+    tr->vectorize(tree->nodes);
+
+    std::shared_ptr<Tree> tree = tt.trainCART(df, predictorsIdx, responseIdx, 0);
+    tree->save(cout);
+    Tree rf = *tree;
+*/
+
     // benchmarking regression of classification?
     if( df.getLevels(responseIdx).size() == 0 ){
         double bias = 0, var = 0;
@@ -201,6 +214,7 @@ int main(void){
         map<long,map<long,unsigned int>> confusionMatrix;
         for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++){
             long prediction = rf.classify( df[row] );
+//            long prediction = rf.predict( df[row] ).asIntegral;
             long truth      = df[row][responseIdx].asIntegral;
             confusionMatrix[prediction][truth]++;
         }
