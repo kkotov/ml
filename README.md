@@ -2,13 +2,14 @@
 
 ## Introduction
 
-This package is yet another Random Forest implementation. Why implementing again?
+This package is yet another Random Forest implementation.
 A quick review of several off-the-shelf packages uncovered they all have the same
 [fatal flaw](http://www.drdobbs.com/windows/a-brief-history-of-windows-programming-r/225701475).
 Apart from jokes, I have two rather specific requirements in our [EMTF](https://kkotov.github.io/emtf.html)
 system. They are:
 1) real-time application: prediction should be quick and made on event-by-event basis
 2) light-weight standalone C++ code: easy to integrate in already existing project
+
 The first one renders useless batch-processing system and the second disfavors
 all-in-one machine learning libraries. Why still not use available light-weight C++
 packages, that generations of CS students implement and put on github? It turns out
@@ -23,9 +24,18 @@ dimensional table representing columns of continuous and categorical variables
 2) [Tree.h](https://github.com/kkotov/ml/blob/master/Tree.h) - binary tree
 3) [TreeTrainer.h](https://github.com/kkotov/ml/blob/master/TreeTrainer.h) - code
 that finds a series of best splits and builds a decision/regression tree
-4) [RandomForest.h](https://github.com/kkotov/ml/blob/master/RandomForest.h)
+4) [RandomForest.h](https://github.com/kkotov/ml/blob/master/RandomForest.h) -
+main user front-end and host of few handles 
 
 ## Example snippets
+
+The test sample can be easily produced in R with
+```
+require(ranger)
+require(MASS)
+
+```
+
 
 Convenience _DataFrame_ class is made to 
 
