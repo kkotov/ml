@@ -3,15 +3,15 @@
 ## Introduction
 
 This package is yet another Random Forest implementation.
-A quick review of several off-the-shelf packages uncovered they all have the same
+A quick review of several off-the-shelf packages uncovered that they all have the same
 [fatal flaw](http://www.drdobbs.com/windows/a-brief-history-of-windows-programming-r/225701475).
 Apart from jokes, I have two rather specific requirements in our [EMTF](https://kkotov.github.io/emtf.html)
 system. They are:
 1) real-time application: prediction should be quick and made on event-by-event basis
-2) light-weight standalone C++ code: easy to integrate in already existing project
+2) light-weight stand alone C++ code: easy to integrate in already existing project
 
-The first one renders useless batch-processing system and the second disfavors
-all-in-one machine learning libraries. Why still not use available light-weight C++
+The first one renders useless batch-processing system while the second disfavors
+all-in-one machine learning libraries. Why still not to use available light-weight C++
 packages, that generations of CS students implement and put on github? It turns out
 that most of those are limited to either classification or regression (not both)
 and rarely consider categorical predictors.
@@ -29,16 +29,48 @@ main user front-end and host of few handles
 
 ## Example snippets
 
-The test sample can be easily produced in R with
+A test sample with three correlated variables (two continuous and one categorical)
+can be produced with the following R script:
 ```
-require(ranger)
 require(MASS)
 
+covar <- t( matrix(c(1.00,0.90,0.70,
+                     0.90,1.00,0.90,
+                     0.70,0.90,1.00),ncol=3) )
+
+
+df <- data.frame( mvrnorm( 10000, c(0,0,0), covar ) )
+colnames(df) <- c("V1","V2","V3")
+
+df$V3 <- factor( ifelse( df$V3>=0, rep(1,length(df$V3)), rep(-1,length(df$V3)) ) )
+
+write.csv(file="one.csv",x=df)
+
+require(ggplot2)
+ggplot(df, aes(x=V1, y=V2, type=V3, color=V3)) + geom_point(size=0.1)
 ```
+<img class=center src=one.png>
 
+The file can be read processed with _example.cc_ code:
+```
+g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf example.cc -lpthread
+./rf
+```
+and compared to the [ranger's](https://github.com/imbs-hl/ranger) results with
+```
+require(ranger)
 
-Convenience _DataFrame_ class is made to 
+trainSet <- df[seq(1,nrow(df),2),]
+testSet  <- df[seq(2,nrow(df),2),]
 
+predictors <- c("V1", "V2")
+
+f <- as.formula(paste("V3 ~ ", paste(predictors, collapse= "+")))
+
+modelFit <- ranger(f, data=trainSet, importance="impurity")
+
+table(testSet$V3,  predict(modelFit,testSet)$prediction)
+```
 
 ## Bibliography:
 
