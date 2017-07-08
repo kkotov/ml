@@ -59,12 +59,14 @@ g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf example.cc -lpthread
 resulting in the following printout:
 
 Classification performance: 
-    | -1  |  1	
+
+q   | -1  |  1	
 ----|-----|-----
 -1: | 2092| 395	
 1:  | 363 | 2152	
 
 Regression performance: 
+
 bias = 0.0125006 sd = 0.406995
 
 It can be compared to the [ranger's](https://github.com/imbs-hl/ranger) results with
