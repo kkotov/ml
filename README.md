@@ -60,7 +60,7 @@ resulting in the following printout:
 
 Classification performance: 
 
-q   | -1  |  1	
+    | -1  |  1	
 ----|-----|-----
 -1: | 2092| 395	
 1:  | 363 | 2152	
@@ -91,7 +91,7 @@ print(paste("bias = ", signif(m,4), ", sd = ", signif(sdev,4)))
 resulting in the following printout:
 
     | -1  |  1
-----|-----|----
+----|-----|------
  -1 | 2175| 310
   1 | 308 | 2207
 
