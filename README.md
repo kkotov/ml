@@ -60,10 +60,10 @@ resulting in the following printout:
 
 Classification performance: 
 
-    | -1  |  1	
-----|-----|-----
--1: | 2092| 395	
-1:  | 363 | 2152	
+&nbsp; | -1  |  1	
+-------|-----|-----
+-1:    | 2092| 395	
+1:     | 363 | 2152	
 
 Regression performance: 
 
@@ -90,10 +90,10 @@ print(paste("bias = ", signif(m,4), ", sd = ", signif(sdev,4)))
 ```
 resulting in the following printout:
 
-    | -1  |  1
-----|-----|------
- -1 | 2175| 310
-  1 | 308 | 2207
+&nbsp; | -1  |  1
+-------|-----|------
+ -1    | 2175| 310
+  1    | 308 | 2207
 
 [1] "bias =  -0.01926 , sd =  0.5055"
 
