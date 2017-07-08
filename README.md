@@ -51,26 +51,49 @@ ggplot(df, aes(x=V1, y=V2, type=V3, color=V3)) + geom_point(size=0.1)
 ```
 <img class=center src=one.png>
 
-The file can be read processed with _example.cc_ code:
+The file can be read processed with [example.cc](https://github.com/kkotov/ml/blob/master/example.cc) code:
 ```
 g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf example.cc -lpthread
 ./rf
 ```
-and compared to the [ranger's](https://github.com/imbs-hl/ranger) results with
+resulting in the following printout:
+
+Classification performance: 
+    | -1  |  1	
+----|-----|-----
+-1: | 2092| 395	
+1:  | 363 | 2152	
+
+Regression performance: 
+bias = 0.0125006 sd = 0.406995
+
+It can be compared to the [ranger's](https://github.com/imbs-hl/ranger) results with
 ```
 require(ranger)
 
 trainSet <- df[seq(1,nrow(df),2),]
 testSet  <- df[seq(2,nrow(df),2),]
 
-predictors <- c("V1", "V2")
+modelFit1 <- ranger("V3 ~ V1 + V2", data=trainSet)
 
-f <- as.formula(paste("V3 ~ ", paste(predictors, collapse= "+")))
+table(testSet$V3,  predict(modelFit1,testSet)$prediction)
 
-modelFit <- ranger(f, data=trainSet, importance="impurity")
+modelFit2 <- ranger("V1 ~ V2 + V3", data=trainSet)
 
-table(testSet$V3,  predict(modelFit,testSet)$prediction)
+m <- mean(testSet$V1 - predict(modelFit2,testSet)$prediction)
+
+sdev <- sd(testSet$V1 - predict(modelFit2,testSet)$prediction)
+
+print(paste("bias = ", signif(m,4), ", sd = ", signif(sdev,4)))
 ```
+resulting in the following printout:
+
+    | -1  |  1
+----|-----|----
+ -1 | 2175| 310
+  1 | 308 | 2207
+
+[1] "bias =  -0.01926 , sd =  0.5055"
 
 ## Bibliography:
 
