@@ -59,8 +59,8 @@ int main(void){
     // see how well classification is doing
     std::map<long,std::map<long,unsigned int>> confusionMatrix;
     for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++){
-        long prediction = rf1.classify( df[row] );
-        long truth      = df[row][responseIdx].asIntegral;
+        long prediction = rf1.classify( dfTest[row] );
+        long truth      = dfTest[row][responseIdx].asIntegral;
         confusionMatrix[prediction][truth]++;
     }
 
@@ -88,8 +88,8 @@ int main(void){
     double bias = 0, var = 0;
     long cnt = 0;
     for(unsigned int row = 0; row>=0 && row < dfTest.nrow(); row++,cnt++){
-        double prediction = rf2.regress( df[row] );
-        double truth      = df[row][responseIdx].asFloating;
+        double prediction = rf2.regress( dfTest[row] );
+        double truth      = dfTest[row][responseIdx].asFloating;
         bias +=  prediction - truth;
         var  += (prediction - truth) * (prediction - truth);
     }
