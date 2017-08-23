@@ -22,9 +22,34 @@ struct Variable {
         switch(type){
             case Categorical: out << "(int)"   << asIntegral; break;
             case Continuous:  out << "(float)" << asFloating; break;
-            default : out << "Unkown"; break;
+            default : out << "(unknown)0"; break;
         }
         return out;
+    }
+    friend std::istream& operator>> (std::istream&, Variable&);
+    std::istream& operator>> (std::istream& in) {
+        // set defaul state
+        type = Unknown;
+        asIntegral = 0;
+        // read at most 9 characters until (and including) the ')' symbol into a C-string 
+        char str[10] = {};
+        // for unformatted input (getline) I need to ignore a possible leading whitespace
+        (in >> std::ws).getline(str,9,')'); // the stream is rewinded pass the brace, but ')' is not captured
+        // match it to one of the type qualifiers
+        if( str == std::string("(float") ) type = Continuous;
+        if( str == std::string("(int")   ) type = Categorical;
+        // check for a formatting error
+        if( type == Unknown && str != std::string("(unknown") ){
+            in.setstate(std::ios::failbit);
+            return in;
+        }
+        // finally, read the value
+        switch(type){
+            case Categorical: in >> asIntegral; break;
+            case Continuous:  in >> asFloating; break;
+            default : in >> asIntegral; break;
+        }
+        return in;
     }
     Variable(void){ type = Unknown; asIntegral = 0; }
     explicit Variable(long long integral){ type = Categorical; asIntegral = integral; }
@@ -32,6 +57,7 @@ struct Variable {
 };
 
 inline std::ostream& operator<< (std::ostream& out, const Variable& var) { return var.operator<<(out); }
+inline std::istream& operator>> (std::istream& out,       Variable& var) { return var.operator>>(out); }
 
 // The DataRow abstraction is meant to be an interface between templated and
 //  non-templated worlds. Although the whole RandomForests framework could

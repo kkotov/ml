@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "DataFrame.h"
+#include "csvUtils.h"
 
 class Tree {
 private:
@@ -293,20 +294,39 @@ public:
     }
 
     bool load(std::istream& input){
-/*
-0,(float)-1.01067,1,1,20
-1,(float)-0.934883,0,2,9
-2,(float)-1.04223,1,3,8
-3,(float)-1.15702,1,4,7
-4,(float)-1.09068,0,5,6
-5,(int)2,0,0,0
-*/
-        return true; // to be implemented
+
+        bool status = true;
+        std::string tmp;
+        unsigned int nNodes = 0;
+        input >> tmp >> nNodes;
+        nodes.resize(nNodes);
+
+        // treat comma as a delimiter
+        csvUtils::setCommaDelim(input);
+
+        for(unsigned int n=0; n<nNodes; n++){
+            // specify line format
+            std::tuple<size_t,Variable,size_t,size_t,size_t> format;
+            // read the line
+            if( !(status &= csvUtils::read_tuple(input,format)) )
+                break;
+            // initialize the node
+            nodes[n].value       = std::get<1>(format);
+            nodes[n].position    = std::get<2>(format);
+            nodes[n].left_child  = std::get<3>(format);
+            nodes[n].right_child = std::get<4>(format);
+        }
+
+        // restore the stream default facet
+        input.imbue(std::locale(std::locale(), new std::ctype<char>()));
+
+        return status;
     }
     bool save(std::ostream& output) const {
         // not packed? - error
         if( left_subtree != 0 || right_subtree != 0 )
             return false;
+        output << "nNodes: " << nodes.size() << std::endl;
         for(unsigned int n=0; n<nodes.size(); n++)
             output << n
                    << "," << nodes[n].value

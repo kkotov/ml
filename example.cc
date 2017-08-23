@@ -22,13 +22,13 @@ int main(void){
     std::getline(input,line);
 
     // treat comma as a delimiter
-    setCommaDelim(input);
+    csvUtils::setCommaDelim(input);
 
     // specify file format
     std::tuple<std::string,float,float,std::string> format;
 
     // read file to the end
-    while( read_tuple(input,format) )
+    while( csvUtils::read_tuple(input,format) )
     {
         std::string level = std::get<3>(format);
         // strip quotes
@@ -76,6 +76,22 @@ int main(void){
             std::cout << value.second <<"\t";
         std::cout << std::endl;
     }
+
+
+    // A simple unit test for the IO
+    std::ofstream file1("rf1.model");
+    rf1.save(file1);
+    file1.close();
+
+    std::ifstream file2("rf1.model");
+    RandomForest ioTest;
+    ioTest.load(file2);
+    file2.close();
+    
+    std::ofstream file3("_rf1.model");
+    ioTest.save(file3);
+    file3.close();
+    // diffing rf1.model and _rf1.model shows no difference
 
 
     // train another random forest to predict V1 using V2 and V3

@@ -52,14 +52,27 @@ public:
     }
 
     bool load(std::istream& input){
-        return true; // to be implemented
+        bool status = true;
+        std::string tmp; 
+        unsigned int nTrees = 0;
+
+        input >> tmp >> nTrees;
+        ensemble.resize(nTrees);
+
+        for(unsigned int n=0, i=0; n<nTrees && status; n++){
+            input >> tmp >> i;
+            if( i != n ) return false;
+            status &= ensemble[n].load(input);
+        }
+
+        return status;
     }
 
     bool save(std::ostream& output) const {
         bool status = true;
         output << "nTrees: " << ensemble.size() << std::endl;
         for(unsigned int n=0; n<ensemble.size(); n++){
-            output << "tree #" << n << std::endl;
+            output << "tree: " << n << std::endl;
             status &= ensemble[n].save(output);
         }
         return status;

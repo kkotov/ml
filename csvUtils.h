@@ -6,6 +6,8 @@
 #include <string>
 #include <unordered_map>
 
+namespace csvUtils {
+
 template<int IDX, int NMAX, typename... Args>
 struct READ_TUPLE {
     static bool read(std::istream &in, std::tuple<Args...> &t){
@@ -40,6 +42,8 @@ void setCommaDelim(std::istream& input){
         }
     };
     input.imbue(std::locale(std::locale(), new field_reader()));
+}
+
 }
 
 #endif

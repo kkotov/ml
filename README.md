@@ -49,6 +49,9 @@ df <- data.frame(V1 = c(x1,x2,x3),
                              )
                       )
       )
+
+write.csv(file="one.csv",x=df)
+
 require(ggplot2)
 ggplot(df,aes(x=V1,y=V2,type=V3,color=V3)) + geom_point(shape = 1, size = 0.1)
 
@@ -57,7 +60,7 @@ ggplot(df,aes(x=V1,y=V2,type=V3,color=V3)) + geom_point(shape = 1, size = 0.1)
 
 The file can be read processed with [example.cc](https://github.com/kkotov/ml/blob/master/example.cc) code:
 ```
-g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf example.cc -lpthread
+g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf example.cc
 ./rf
 ```
 resulting in the following printout:
