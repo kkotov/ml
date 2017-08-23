@@ -293,9 +293,17 @@ public:
     }
 
     bool load(std::istream& input){
+/*
+0,(float)-1.01067,1,1,20
+1,(float)-0.934883,0,2,9
+2,(float)-1.04223,1,3,8
+3,(float)-1.15702,1,4,7
+4,(float)-1.09068,0,5,6
+5,(int)2,0,0,0
+*/
         return true; // to be implemented
     }
-    bool save(std::ostream& output){
+    bool save(std::ostream& output) const {
         // not packed? - error
         if( left_subtree != 0 || right_subtree != 0 )
             return false;

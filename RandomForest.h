@@ -50,6 +50,21 @@ public:
         for(size_t i=0; i<treePtrs.size(); i++)
             ensemble[i] = *treePtrs[i];
     }
+
+    bool load(std::istream& input){
+        return true; // to be implemented
+    }
+
+    bool save(std::ostream& output) const {
+        bool status = true;
+        output << "nTrees: " << ensemble.size() << std::endl;
+        for(unsigned int n=0; n<ensemble.size(); n++){
+            output << "tree #" << n << std::endl;
+            status &= ensemble[n].save(output);
+        }
+        return status;
+    }
+
 };
 
 #endif
