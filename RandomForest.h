@@ -43,9 +43,9 @@ public:
         return it->first;
     }
 
-    void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx) {
+    void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, size_t nTrees = 100) {
         TreeTrainer tt;
-        std::vector<std::shared_ptr<Tree>> treePtrs = tt.trainRandomForest(df, predictorsIdx, responseIdx, 0);
+        std::vector<std::shared_ptr<Tree>> treePtrs = tt.trainRandomForest(df, predictorsIdx, responseIdx, nTrees, 0);
         ensemble.resize( treePtrs.size() );
         for(size_t i=0; i<treePtrs.size(); i++)
             ensemble[i] = *treePtrs[i];

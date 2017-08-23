@@ -36,6 +36,8 @@ private:
                             return std::pair<unsigned int,unsigned int>(idx,level);
                     }
         );
+        // save the current random engine state
+        rState = dre;
         return vars;
     }
 
@@ -54,6 +56,8 @@ private:
                              (nSampled < nTotal ? nSampled : nTotal),
                              [&uid, &dre](void){ return uid(dre); }
             );
+            // save the current random engine state
+            rState = dre;
         }
         return std::vector<unsigned int>(retval.begin(),
                                          retval.begin() +
@@ -444,14 +448,13 @@ public:
         return model->second;
     }
 
-    std::vector<std::shared_ptr<Tree>> trainRandomForest(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, long seed) {
+    std::vector<std::shared_ptr<Tree>> trainRandomForest(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, size_t nTrees, unsigned int seed) {
         // reproducibility
         rState.seed(seed);
 
-        const int nTrees = 100;
         std::vector<std::shared_ptr<Tree>> ensemble(nTrees);
         for(unsigned int t=0; t<nTrees; t++){
-            std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.5);
+            std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.66);
             std::shared_ptr<Tree> tree( new Tree() );
             Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, true);
             tree->nodes.reserve(tr->tree_size);

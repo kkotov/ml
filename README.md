@@ -32,22 +32,26 @@ main user front-end and host of few handles
 A test sample with three correlated variables (two continuous and one categorical)
 can be produced with the following R script:
 ```
-require(MASS)
+phi <- runif(10000,0,2*3.1415927)
+rho <- rnorm(10000,phi*0.3,phi*0.05)
+x1 <- rho*cos(phi)
+y1 <- rho*sin(phi)
+x2 <- rho*cos(phi-3.1415927*2/3)
+y2 <- rho*sin(phi-3.1415927*2/3)
+x3 <- rho*cos(phi-3.1415927*4/3)
+y3 <- rho*sin(phi-3.1415927*4/3)
 
-covar <- t( matrix(c(1.00,0.90,0.70,
-                     0.90,1.00,0.90,
-                     0.70,0.90,1.00),ncol=3) )
-
-
-df <- data.frame( mvrnorm( 10000, c(0,0,0), covar ) )
-colnames(df) <- c("V1","V2","V3")
-
-df$V3 <- factor( ifelse( df$V3>=0, rep(1,length(df$V3)), rep(-1,length(df$V3)) ) )
-
-write.csv(file="one.csv",x=df)
-
+df <- data.frame(V1 = c(x1,x2,x3),
+                 V2 = c(y1,y2,y3),
+                 V3 = factor(c(rep(1,length(x1)),
+                               rep(2,length(x2)),
+                               rep(3,length(x3))
+                             )
+                      )
+      )
 require(ggplot2)
-ggplot(df, aes(x=V1, y=V2, type=V3, color=V3)) + geom_point(size=0.1)
+ggplot(df,aes(x=V1,y=V2,type=V3,color=V3)) + geom_point(shape = 1, size = 0.1)
+
 ```
 <img class=center src=one.png>
 
@@ -60,14 +64,15 @@ resulting in the following printout:
 
 Classification performance: 
 
-&nbsp; | -1  |  1	
--------|-----|-----
--1:    | 2092| 395	
-1:     | 363 | 2152	
+&nbsp; |  1  |  2  |  3
+-------|-----|-----|------
+1      | 4748| 162 | 103
+2      | 105 | 4738| 157
+3      | 149 | 100 | 4740
 
 Regression performance: 
 
-bias = 0.0125006 sd = 0.406995
+bias = -0.00122876 sd = 0.657455
 
 It can be compared to the [ranger's](https://github.com/imbs-hl/ranger) results with
 ```
@@ -90,12 +95,13 @@ print(paste("bias = ", signif(m,4), ", sd = ", signif(sdev,4)))
 ```
 resulting in the following printout:
 
-&nbsp; | -1  |  1
--------|-----|------
- -1    | 2175| 310
-  1    | 308 | 2207
+&nbsp; |  1  |  2  |  3
+-------|-----|-----|------
+1      | 4746| 114 | 140
+2      | 148 | 4732| 120
+3      | 117 | 142 | 4741
 
-[1] "bias =  -0.01926 , sd =  0.5055"
+[1] "bias =  0.0006507 , sd =  0.6773"
 
 ## Bibliography:
 
