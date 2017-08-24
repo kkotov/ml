@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <vector>
 
+#include <future>
+#include <chrono>
+#include <thread>
+
 #include "DataFrame.h"
 #include "Tree.h"
 #include "TreeTrainer.h"
@@ -47,9 +51,47 @@ public:
         TreeTrainer tt;
 
         ensemble.resize(nTrees);
-        // the best place to dispatch individual trees to different threads
-        for(unsigned int t=0; t<nTrees; t++)
-            ensemble[t] = *(tt.trainRFtree(df, predictorsIdx, responseIdx, t*100)); 
+
+        const unsigned int maxThreads = std::thread::hardware_concurrency();
+
+        std::future<std::shared_ptr<Tree>> results[maxThreads];
+
+        for(unsigned int t=0, freeThread=0; t<nTrees; ){
+            // below I put together a rudimentary executor framework that limits a number of tasks running simultaneously
+
+            // poll the status of the threads until any one of them frees up
+            while( results[freeThread].valid() &&
+                   results[freeThread].wait_for(std::chrono::seconds(0)) != std::future_status::ready )
+            {
+                // make sure the thread is/was running and force it to run if it is not
+                if( results[freeThread].wait_for(std::chrono::seconds(0)) == std::future_status::deferred ){
+                    ensemble[t++] = *(results[freeThread].get());
+                    break;
+                }
+                // try next thread
+                freeThread = (freeThread + 1) % maxThreads;
+                std::this_thread::yield();
+            }
+
+            // current thread finished and holds result/exception
+            if( results[freeThread].valid() )
+                ensemble[t++] = *(results[freeThread].get());
+
+            // dispatch a new task
+            results[freeThread] = std::async(std::launch::async,
+                                             &TreeTrainer::trainRFtree,
+                                             &tt,
+                                             df,
+                                             predictorsIdx,
+                                             responseIdx,
+                                             t*100
+                                             // an optional 3rd argument here defines a number
+                                             // of events in the terminal nodes and can help to
+                                             // speed up the tree-growing process for big datasets
+                                             // (at expense of performance, of course)
+                                  );
+        }
+
     }
 
     bool load(std::istream& input){
