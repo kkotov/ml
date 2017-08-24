@@ -72,6 +72,12 @@ private:
                          const std::vector<unsigned int>& subset = {},
                          bool  isRandomForest = true,
                          size_t MIN_ENTRIES = 5
+                                                 // an optional last argument here defines a number
+                                                 // of events in terminal nodes and can help to
+                                                 // speed up the tree-growing process for big datasets
+                                                 // (at expense of performance, of course)
+
+
     ){
         Tree *tree = new Tree();
 

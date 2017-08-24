@@ -56,7 +56,7 @@ public:
 
         std::future<std::shared_ptr<Tree>> results[maxThreads];
 
-        for(unsigned int t=0, freeThread=0; t<nTrees; ){
+        for(unsigned int t=0, freeThread=0, tasks=0; t<nTrees; ){
             // below I put together a rudimentary executor framework that limits a number of tasks running simultaneously
 
             // poll the status of the threads until any one of them frees up
@@ -73,23 +73,22 @@ public:
                 std::this_thread::yield();
             }
 
-            // current thread finished and holds result/exception
+            // got here because the thread finished and holds result/exception
             if( results[freeThread].valid() )
                 ensemble[t++] = *(results[freeThread].get());
 
-            // dispatch a new task
-            results[freeThread] = std::async(std::launch::async,
-                                             &TreeTrainer::trainRFtree,
-                                             &tt,
-                                             df,
-                                             predictorsIdx,
-                                             responseIdx,
-                                             t*100
-                                             // an optional 3rd argument here defines a number
-                                             // of events in the terminal nodes and can help to
-                                             // speed up the tree-growing process for big datasets
-                                             // (at expense of performance, of course)
-                                  );
+            // dispatch a new task unless yet unfinished tasks wll already sum up to nTrees
+            if( tasks < nTrees ){
+                results[freeThread] = std::async(std::launch::async,
+                                                 &TreeTrainer::trainRFtree,
+                                                 &tt,
+                                                 df,
+                                                 predictorsIdx,
+                                                 responseIdx,
+                                                 t*100
+                                      );
+                tasks++;
+            } else freeThread = (freeThread + 1) % maxThreads;
         }
 
     }
