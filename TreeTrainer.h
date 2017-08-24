@@ -70,7 +70,8 @@ private:
                          unsigned int responseIdx,
                          const std::vector<unsigned int>& predictorsIdx,
                          const std::vector<unsigned int>& subset = {},
-                         bool  isRandomForest = true
+                         bool  isRandomForest = true,
+                         size_t MIN_ENTRIES = 5
     ){
         Tree *tree = new Tree();
 
@@ -81,7 +82,7 @@ private:
         tree->set_size = size;
 
 // criterion to stop growing tree
-#define MIN_ENTRIES 5
+///#define MIN_ENTRIES 5
 
         if( df.getLevels(responseIdx).size() == 0 ){
             // response is Variable::Continuous
@@ -336,7 +337,7 @@ private:
                 tree->nodes.push_back( Tree::Node( long(tree->majorityVote) ) );
             tree->tree_size = 1; // leaf
         }
-#undef MIN_ENTRIES
+///#undef MIN_ENTRIES
 
         return tree;
     }
@@ -448,22 +449,19 @@ public:
         return model->second;
     }
 
-    std::vector<std::shared_ptr<Tree>> trainRandomForest(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, size_t nTrees, unsigned int seed) {
+    std::shared_ptr<Tree> trainRFtree(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, unsigned int seed) {
         // reproducibility
         rState.seed(seed);
 
-        std::vector<std::shared_ptr<Tree>> ensemble(nTrees);
-        for(unsigned int t=0; t<nTrees; t++){
-            std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.66);
-            std::shared_ptr<Tree> tree( new Tree() );
-            Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, true);
-            tree->nodes.reserve(tr->tree_size);
-            tr->vectorize(tree->nodes);
-            delete tr;
-            ensemble[t] = tree;
-        }
+        std::shared_ptr<Tree> tree( new Tree() );
 
-        return ensemble;
+        std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.66);
+        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, true);
+        tree->nodes.reserve(tr->tree_size);
+        tr->vectorize(tree->nodes);
+        delete tr;
+
+        return tree;
     }
 
 };
