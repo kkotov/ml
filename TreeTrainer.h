@@ -20,44 +20,40 @@ class TreeTrainer {
 private:
     typedef std::list<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level index (if categorical)
 
-    std::default_random_engine rState;
-
-    SplitVars generateRandomSplitVars(const std::vector<std::vector<long>>& schema,
-                                      const std::vector<unsigned int>& predictorsIdx,
-                                      unsigned int mtry){
+    static SplitVars generateRandomSplitVars(const std::vector<std::vector<long>>& schema,
+                                             const std::vector<unsigned int>& predictorsIdx,
+                                             unsigned int mtry,
+                                             std::default_random_engine &rState)
+    {
         SplitVars vars;
-        std::default_random_engine dre(rState);
         std::uniform_int_distribution<unsigned int> uid(0, predictorsIdx.size()-1), uid_l;
         std::generate_n( back_inserter(vars),
                          mtry,
-                         [&uid,&uid_l,&dre,&schema,&predictorsIdx](void){
-                             unsigned int idx = predictorsIdx[ uid(dre) ];
-                             unsigned int level = (schema[idx].size()>0 ? uid_l(dre)%schema[idx].size() : 0);
+                         [&uid,&uid_l,&rState,&schema,&predictorsIdx](void){
+                             unsigned int idx = predictorsIdx[ uid(rState) ];
+                             unsigned int level = (schema[idx].size()>0 ? uid_l(rState)%schema[idx].size() : 0);
                             return std::pair<unsigned int,unsigned int>(idx,level);
                     }
         );
-        // save the current random engine state
-        rState = dre;
         return vars;
     }
 
-    std::vector<unsigned int> sample(unsigned int nTotal,
-                                     unsigned int nSampled,
-                                     bool replace = false){
+    static std::vector<unsigned int> sample(unsigned int nTotal,
+                                            unsigned int nSampled,
+                                            std::default_random_engine &rState, // feedback the current state to the call context
+                                            bool replace = false)
+    {
         // definitely, there is room for improvement below
         std::vector<unsigned int> retval(nTotal);
         if( !replace ){
             std::iota(retval.begin(),retval.end(),0);
             std::shuffle(retval.begin(),retval.end(),rState);
         } else {
-            std::default_random_engine dre(rState);
             std::uniform_int_distribution<> uid(0, nTotal);
             std::generate_n( retval.begin(),
                              (nSampled < nTotal ? nSampled : nTotal),
-                             [&uid, &dre](void){ return uid(dre); }
+                             [&uid, &rState](void){ return uid(rState); }
             );
-            // save the current random engine state
-            rState = dre;
         }
         return std::vector<unsigned int>(retval.begin(),
                                          retval.begin() +
@@ -66,19 +62,18 @@ private:
     }
 
     // thread-safe implementation of CART with gini/entropy/rms purity metrices
-    Tree* findBestSplits(const DataFrame& df,
-                         unsigned int responseIdx,
-                         const std::vector<unsigned int>& predictorsIdx,
-                         const std::vector<unsigned int>& subset = {},
-                         bool  isRandomForest = true,
-                         size_t MIN_ENTRIES = 5
-                                                 // an optional last argument here defines a number
-                                                 // of events in terminal nodes and can help to
-                                                 // speed up the tree-growing process for big datasets
-                                                 // (at expense of performance, of course)
-
-
-    ){
+    static Tree* findBestSplits(const DataFrame& df,
+                                unsigned int responseIdx,
+                                const std::vector<unsigned int>& predictorsIdx,
+                                const std::vector<unsigned int>& subset,
+                                std::default_random_engine &rState, // feedback the current state to the call context
+                                bool  isRandomForest = true,
+                                size_t MIN_ENTRIES = 5)
+                                // an optional last argument here defines a number
+                                // of events in terminal nodes and can help to
+                                // speed up the tree-growing process for big datasets
+                                // (at expense of performance, of course)
+    {
         Tree *tree = new Tree();
 
         // safety: nothing to split on? - return an empty tree
@@ -174,7 +169,8 @@ private:
                       ( df.getLevels(responseIdx).size() == 0 ?
                           std::floor(predictorsIdx.size()>15 ? predictorsIdx.size()/3 : 5) :
                           std::floor( sqrt(predictorsIdx.size()) )
-                      )
+                      ),
+                      rState
                    );
         } else {
             for(unsigned int idx : predictorsIdx){
@@ -315,8 +311,8 @@ private:
         if( left_subset.size() > MIN_ENTRIES && right_subset.size() > MIN_ENTRIES ){
 
             // another good place to use the threads
-            Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  isRandomForest);
-            Tree *right_subtree = findBestSplits(df, responseIdx, predictorsIdx, right_subset, isRandomForest);
+            Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  rState, isRandomForest);
+            Tree *right_subtree = findBestSplits(df, responseIdx, predictorsIdx, right_subset, rState, isRandomForest);
 
             left_subtree->parent  = tree;
             right_subtree->parent = tree;
@@ -351,18 +347,17 @@ private:
 public:
 
     // train one simple Classification And Regression Tree
-    std::shared_ptr<Tree> trainCART(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, long seed) {
-        if( df.nrow() < 1 ) return std::shared_ptr<Tree>(); // maybe better throw?
+    static std::shared_ptr<Tree> trainCART(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, long seed) {
+        if( df.nrow() < 1 ) return std::shared_ptr<Tree>(); // maybe better to throw?
 
-        // reproducibility
-        rState.seed(seed);
+        std::default_random_engine rState(seed); // reproducibility: same seed results in identical trees
 
         // cross-validate models over nFolds for evaluating the best model complexity
         const size_t nFolds = 10;
         std::vector<double> alphas[nFolds]; // series of hyper-parameter for each fold
         std::vector<std::shared_ptr<Tree>> models[nFolds]; // series of corresponding models for each fold
         std::vector<double> outOfSampleError[nFolds]; // OOS error estimate
-        std::vector<unsigned int> shuffled = sample(df.nrow(),df.nrow());
+        std::vector<unsigned int> shuffled = sample(df.nrow(), df.nrow(), rState);
         for(size_t fold=0; fold<nFolds; fold++){
             // partition into training and validation sets
             std::vector<unsigned int> trainSet, validSet;
@@ -374,7 +369,7 @@ public:
             std::copy(end,               shuffled.cend(), std::back_inserter(trainSet));
             std::copy(begin,             end,             std::back_inserter(validSet));
             // get the tree
-            Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, trainSet, false);
+            Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, trainSet, rState, false);
             // and prune it
             std::map<double,std::shared_ptr<Tree>> m = tree->prune(); // guaranteed to create a new tree
             delete tree;
@@ -447,7 +442,7 @@ public:
 
         double bestAlpha = it->first;
 
-        Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, shuffled, false);
+        Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, shuffled, rState, false);
         std::map<double,std::shared_ptr<Tree>> m = tree->prune();
         delete tree;
         auto model = m.lower_bound(bestAlpha);
@@ -455,14 +450,15 @@ public:
         return model->second;
     }
 
-    std::shared_ptr<Tree> trainRFtree(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, unsigned int seed) {
-        // reproducibility
-        rState.seed(seed);
+    static std::shared_ptr<Tree> trainRFtree(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, unsigned int seed) {
+
+        std::default_random_engine rState(seed); // reproducibility: same seed results in identical trees
 
         std::shared_ptr<Tree> tree( new Tree() );
 
-        std::vector<unsigned int> s = sample(df.nrow(),df.nrow()*0.66);
-        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, true);
+        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*0.66, rState);
+        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, rState, true);
+
         tree->nodes.reserve(tr->tree_size);
         tr->vectorize(tree->nodes);
         delete tr;
