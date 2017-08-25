@@ -16,6 +16,7 @@
 #include "DataFrame.h"
 #include "Tree.h"
 
+// thread-safe stateless class encomassing static functions only
 class TreeTrainer {
 private:
     typedef std::list<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level index (if categorical)
@@ -40,7 +41,7 @@ private:
 
     static std::vector<unsigned int> sample(unsigned int nTotal,
                                             unsigned int nSampled,
-                                            std::default_random_engine &rState, // feedback the current state to the call context
+                                            std::default_random_engine &rState, // feed the current state back to the call context
                                             bool replace = false)
     {
         // definitely, there is room for improvement below
@@ -66,7 +67,7 @@ private:
                                 unsigned int responseIdx,
                                 const std::vector<unsigned int>& predictorsIdx,
                                 const std::vector<unsigned int>& subset,
-                                std::default_random_engine &rState, // feedback the current state to the call context
+                                std::default_random_engine &rState, // feed the current state back to the call context
                                 bool  isRandomForest = true,
                                 size_t MIN_ENTRIES = 5)
                                 // an optional last argument here defines a number
