@@ -14,7 +14,8 @@ The first one renders useless batch-processing system while the second disfavors
 all-in-one machine learning libraries. Why still not to use available light-weight C++
 packages, that generations of CS students implement and put on github? It turns out
 that most of those are limited to either classification or regression (not both)
-and rarely consider categorical predictors.
+and rarely consider categorical predictors. On the other hand my version also was
+not designed to handle a possible multivariate response.
 
 ## Design
 
