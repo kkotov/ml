@@ -40,7 +40,7 @@ struct Variable {
         if( str == std::string("(int")   ) type = Categorical;
         // check for a formatting error
         if( type == Unknown && str != std::string("(unknown") ){
-            in.setstate(std::ios::failbit);
+            in.setstate(std::ios_base::failbit);
             return in;
         }
         // finally, read the value

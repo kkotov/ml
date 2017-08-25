@@ -299,6 +299,8 @@ public:
         std::string tmp;
         unsigned int nNodes = 0;
         input >> tmp >> nNodes;
+        if( input.rdstate() & std::ios_base::failbit )
+            return false;
         nodes.resize(nNodes);
 
         // treat comma as a delimiter

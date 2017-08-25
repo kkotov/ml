@@ -99,11 +99,14 @@ public:
         unsigned int nTrees = 0;
 
         input >> tmp >> nTrees;
+        if( input.rdstate() & std::ios_base::failbit )
+            return false;
         ensemble.resize(nTrees);
 
         for(unsigned int n=0, i=0; n<nTrees && status; n++){
             input >> tmp >> i;
-            if( i != n ) return false;
+            if( i != n || input.rdstate() & std::ios_base::failbit )
+                return false;
             status &= ensemble[n].load(input);
         }
 
