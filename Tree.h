@@ -31,13 +31,13 @@ private:
     size_t tree_size; // 1 + sizeof(left_subtree) + sizeof(right_subtree), valid only until tree is packed
     std::vector<Node> nodes; // vectorized tree - packed representation after I'm done with growing it
 
-    // regression characteristics for prunning, valid before tree is packed
+    // regression characteristics for pruning, valid before tree is packed
     double rss, sum, sum2; // RSS, sum, and sum of squares of dependent variable on training set
-    // classification characteristics for prunning, valid before tree is packed
+    // classification characteristics for pruning, valid before tree is packed
     std::unordered_map<long long, size_t> levelCounts; // cached counts for fast impurity calculations
     double gini, crossEntropy; // impurity of dependent variable on training set
     long long majorityVote; // dominant category of the set
-    // below is an alias from one of the metrices above: gini/crossEntropy/rss
+    // below is an alias from one of the metrics above: gini/crossEntropy/rss
     double metric;
     // number of training entries - entries "seen" by this tree
     size_t set_size;
@@ -59,7 +59,7 @@ private:
 
         size_t size = 1;
 
-        // recure if not a terminal node
+        // recur if not a terminal node
         if( left_subtree != 0 && right_subtree != 0 ){
             local_root.left_child  = dest.size();
             size += left_subtree->vectorize(dest);
@@ -71,7 +71,7 @@ private:
         return size;
     }
 
-    // function that eventually gets invoked by the end-used calling predict
+    // function that eventually gets invoked by the end-user calling predict
     Variable traverseVectorized(const DataRow& row, const Node& root) const {
         // is it a leaf/terminal_node?
         if( root.left_child == 0 && root.right_child == 0 )
@@ -94,7 +94,7 @@ private:
         return Variable();
     }
 
-    // analogue of the previous function that is handy while tree gets constructed (not vectorized)
+    // analog of the previous function that is handy while tree gets constructed (not vectorized)
     Variable traverse(const DataRow& row, const Tree* root) const {
         if( root == 0 ) return Variable(); // uninitialized Variable is an error sign
 
@@ -121,20 +121,21 @@ private:
 
     // weakest link pruning as prescribed in ESLII p.308
     //  I prune tree to a single node and return a series of intermediate/nested trees (pointers)
-    //  each tree is a single node collapse smaller than the predecessor;
-    //  trees are indexed by the alphas that would yeld these trees in cost-complexity
-    //  optimization would I start with initial tree and the alphas
+    //  each tree is smaller than the predecessor by a single node collapse;
+    //  trees are indexed by the alphas that would lead to such trees
+    //  would I start with the initial tree and perform the cost-complexity
+    //  optimization with such alphas
     std::map<double,std::shared_ptr<Tree>> prune(void){
 
         std::map<double,std::shared_ptr<Tree>> retval;
 
-        // nothing to prune for a single-node tree return empty set
+        // nothing to prune for a single-node tree return an empty set
         if( tree_size == 1 ) return retval;
 
         std::vector<Tree*> candsForCollapse;
         double metricTotal = 0;
 
-        // traverse the tree with local FIFO simulating stack of recursion
+        // traverse the tree with local FIFO simulating stack of the recursion
         std::queue<Tree*> fifo;
         fifo.push(this);
         while( !fifo.empty() ){
@@ -157,10 +158,10 @@ private:
             }
         }
 
-        // bookkeeping for number of collapses that'll lazily propagate up the tree
+        // bookkeeping for number of collapses that'll lazily propagate up the tree;
         // the idea is to take a note of tree size reduction, but not to spend time
-        //  on updating every node yet as most of them won't be touched by pruning
-        // (reduction only for the immediate parents of the pruned nodes is remembered)
+        //  on updating every node as most of them won't be touched by pruning at this point yet
+        // (only reduction for the immediate parents of the pruned nodes is remembered)
         std::unordered_map<Tree*,int> tree_size_decrease;
 
         // "weakest link pruning: we successively collapse the internal node that
@@ -170,13 +171,13 @@ private:
                    j->metric - j->left_subtree->metric - j->right_subtree->metric ;
         };
 
-        // construct a priority queue out of the vector of candidates for pruning
+        // construct a priority queue from the vector of candidates for pruning
         std::make_heap(candsForCollapse.begin(), candsForCollapse.end(), greaterEq);
 
         size_t totalSizeDecrease = 0;
         double alpha = 0;
 
-        // for completenes store also the current unchanged tree (alpha = 0)
+        // for completeness store also the current unchanged tree (alpha = 0)
         std::shared_ptr<Tree> tree0(new Tree());
         tree0->nodes.reserve(tree_size);
         vectorize(tree0->nodes);
@@ -197,7 +198,7 @@ private:
             // by how much alpha should increase to balance the increase in metric
             alpha += (t->metric - t->left_subtree->metric - t->right_subtree->metric)/2.;
 
-            // new leaf has to become average/majorityVote rather than a split point
+            // the new leaf has to hold an average/majorityVote rather than be a split point node
             switch( t->left_subtree->nodes[0].value.type ){
                 case Variable::Continuous:
                     t->nodes[0].value.type = Variable::Continuous;
@@ -245,7 +246,7 @@ private:
 
 public:
     Variable predict(const DataRow& row) const {
-        // is tree initialized? if not return default Variable as a sign of error
+        // is tree initialized? if not return default Variable of 'unknown' type as a sign of error
         if( nodes.size() == 0 ) return Variable(); 
         // is root node initialized?
         if( nodes[0].value.type == Variable::Unknown ) return Variable(); 
