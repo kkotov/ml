@@ -171,7 +171,6 @@ public:
         // check if we start fresh
         if( schema.size() == 0 ){
             // initialize the empty DataFrame with the row
-            rows.push_back(row);
             std::transform(row.data.cbegin(), row.data.cend(), std::back_inserter(schema),
                 [](const Variable& var){ // consider just two levels, recalculate later
                     return (var.type == Variable::Categorical ? std::vector<long>(2) : std::vector<long>());

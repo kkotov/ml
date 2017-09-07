@@ -2,6 +2,7 @@
 #include <fstream>
 #include <tuple>
 #include <string>
+#include <stdlib.h> // rand
 
 #include "DataFrame.h"
 #include "RandomForest.h"
@@ -18,8 +19,7 @@ int main(void){
     if( !input ) return 0;
 
     // read first line that is the header
-    std::string line;
-    std::getline(input,line);
+    input.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
 
     // treat comma as a delimiter
     csvUtils::setCommaDelim(input);
@@ -44,8 +44,9 @@ int main(void){
     // split the data frame into training and test data partitions:
     DataFrame dfTrain, dfTest;
     for(size_t row=0; row<df.nrow(); row++)
-        if( row%2 ) dfTrain.rbind(df[row]);
-        else        dfTest. rbind(df[row]);
+        if( rand()%2 ) dfTrain.rbind(df[row]);
+        else           dfTest. rbind(df[row]);
+
     dfTrain.countAllLevels();
     dfTest .countAllLevels();
 
@@ -54,7 +55,7 @@ int main(void){
     RandomForest rf1;
     std::vector<unsigned int> predictorsIdx = {V1,V2};
     unsigned int responseIdx = V3;
-    rf1.train(dfTrain,predictorsIdx,responseIdx);
+    rf1.train(dfTrain,predictorsIdx,responseIdx,100,std::cout);
 
     // see how well classification is doing
     std::map<long,std::map<long,unsigned int>> confusionMatrix;
@@ -98,7 +99,7 @@ int main(void){
     RandomForest rf2;
     predictorsIdx = {V2,V3};
     responseIdx = V1;
-    rf2.train(dfTrain,predictorsIdx,responseIdx);
+    rf2.train(dfTrain,predictorsIdx,responseIdx,100,std::cout);
 
     std::cout << std::endl << "Regression performance: " << std::endl;
     double bias = 0, var = 0;

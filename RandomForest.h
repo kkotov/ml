@@ -47,7 +47,7 @@ public:
         return it->first;
     }
 
-    void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, size_t nTrees = 100) {
+    void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, size_t nTrees, std::ostream &log) {
 
         ensemble.resize(nTrees);
 
@@ -78,6 +78,7 @@ public:
 
             // dispatch a new task unless yet unfinished tasks wll already sum up to nTrees
             if( tasks < nTrees ){
+                log << '\r' << "Training tree #" << (tasks+1) << "/" << nTrees << std::flush; // "\e[A"
                 results[freeThread] = std::async(std::launch::async,
                                                  TreeTrainer::trainRFtree,
                                                  df,
@@ -89,6 +90,7 @@ public:
             } else freeThread = (freeThread + 1) % maxThreads;
         }
 
+        log << std::endl;
     }
 
     bool load(std::istream& input){
