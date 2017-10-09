@@ -19,7 +19,13 @@ struct READ_TUPLE {
 
 template<int NMAX, typename... Args>
 struct READ_TUPLE<NMAX,NMAX,Args...>{
-    static bool read(std::istream &in, std::tuple<Args...> &t){ return true; }
+    static bool read(std::istream &in, std::tuple<Args...> &t){
+        if( in.peek() == '\n' )
+            return true;
+        else // format error (different number of elements)
+            in.setstate(std::ios::badbit);
+        return false;
+    }
 };
 
 template <typename... Args>
