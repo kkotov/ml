@@ -19,23 +19,44 @@
 // thread-safe stateless class encomassing static functions only
 class TreeTrainer {
 private:
-    typedef std::list<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level index (if categorical)
+    typedef std::vector<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level index (if categorical)
 
     static SplitVars generateRandomSplitVars(const std::vector<std::vector<long>>& schema,
                                              const std::vector<unsigned int>& predictorsIdx,
                                              unsigned int mtry,
-                                             std::default_random_engine &rState)
+                                             bool continuousResponse,
+                                             std::default_random_engine& rState)
     {
+        // turn multilevel categorical predictors into dummy variables
+        SplitVars oneHOTencoded;
+
+        for(unsigned int idx: predictorsIdx){
+            unsigned int nLevels = schema[idx].size();
+            if( nLevels > 0 )
+                for(unsigned int levelIdx = 0; levelIdx < nLevels; ++levelIdx)
+                    oneHOTencoded.push_back(std::make_pair(idx, schema[idx][levelIdx]));
+            else
+                oneHOTencoded.push_back(std::make_pair(idx,0));
+        }
+
+        unsigned int nPredictors = oneHOTencoded.size();
+
+        // auto-assign mtry
+        if( mtry == 0 )
+            mtry = ( continuousResponse ?
+                              std::floor( nPredictors>15 ? nPredictors/3 : (nPredictors > 5 ? 5 : nPredictors) ) :
+                              std::floor( sqrt(nPredictors) )
+                   );
+
+        // sample mtry variables **without replacement** from all the variables
+        std::vector<unsigned int> indices(nPredictors);
+        std::iota(indices.begin(), indices.end(), 0);
+        std::shuffle(indices.begin(), indices.end(), rState);
+
         SplitVars vars;
-        std::uniform_int_distribution<unsigned int> uid(0, predictorsIdx.size()-1), uid_l;
-        std::generate_n( back_inserter(vars),
-                         mtry,
-                         [&uid,&uid_l,&rState,&schema,&predictorsIdx](void){
-                             unsigned int idx = predictorsIdx[ uid(rState) ];
-                             unsigned int level = (schema[idx].size()>0 ? uid_l(rState)%schema[idx].size() : 0);
-                            return std::pair<unsigned int,unsigned int>(idx,level);
-                    }
-        );
+        for(unsigned int i=0; i<mtry; ++i)
+            vars.push_back( oneHOTencoded[i] );
+
         return vars;
     }
 
@@ -50,7 +71,7 @@ private:
             std::iota(retval.begin(),retval.end(),0);
             std::shuffle(retval.begin(),retval.end(),rState);
         } else {
-            std::uniform_int_distribution<> uid(0, nTotal);
+            std::uniform_int_distribution<> uid(0, nTotal-1); // exclude max value
             std::generate_n( retval.begin(),
                              (nSampled < nTotal ? nSampled : nTotal),
                              [&uid, &rState](void){ return uid(rState); }
@@ -164,10 +185,8 @@ private:
             vars = generateRandomSplitVars(
                       df.getSchema(),
                       predictorsIdx,
-                      ( df.getLevels(responseIdx).size() == 0 ?
-                          std::floor(predictorsIdx.size()>15 ? predictorsIdx.size()/3 : 5) :
-                          std::floor( sqrt(predictorsIdx.size()) )
-                      ),
+                      0,
+                      df.getLevels(responseIdx).size() == 0,
                       rState
                    );
         } else {
@@ -453,7 +472,7 @@ public:
 
         std::shared_ptr<Tree> tree( new Tree() );
 
-        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*0.66, rState);
+        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*0.632, rState, false); //true);
         Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, rState, true);
 
         tree->nodes.reserve(tr->tree_size);
