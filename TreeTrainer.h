@@ -69,7 +69,7 @@ private:
                                 const std::vector<unsigned int>& subset,
                                 std::default_random_engine &rState, // feed the current state back to the call context
                                 bool  isRandomForest = true,
-                                size_t MIN_ENTRIES = 5)
+                                size_t MIN_ENTRIES = 5) // criterion to stop growing tree
                                 // an optional last argument here defines a number
                                 // of events in terminal nodes and can help to
                                 // speed up the tree-growing process for big datasets
@@ -82,9 +82,6 @@ private:
 
         size_t size = subset.size();
         tree->set_size = size;
-
-// criterion to stop growing tree
-///#define MIN_ENTRIES 5
 
         if( df.getLevels(responseIdx).size() == 0 ){
             // response is Variable::Continuous
@@ -308,8 +305,8 @@ private:
                 default : return new Tree(); break;
         }
 
-        // Continue growing tree until any of the subsets are smaller the MIN_ENTRIES
-        if( left_subset.size() > MIN_ENTRIES && right_subset.size() > MIN_ENTRIES ){
+        // Continue growing tree until any of the subsets is not empty
+        if( left_subset.size() > 0 && right_subset.size() > 0 ){
 
             // another good place to use the threads
             Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  rState, isRandomForest);
@@ -340,7 +337,6 @@ private:
                 tree->nodes.push_back( Tree::Node( long(tree->majorityVote) ) );
             tree->tree_size = 1; // leaf
         }
-///#undef MIN_ENTRIES
 
         return tree;
     }
