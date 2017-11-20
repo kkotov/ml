@@ -24,20 +24,10 @@ private:
     static SplitVars generateRandomSplitVars(const std::vector<std::vector<long>>& schema,
                                              const std::vector<unsigned int>& predictorsIdx,
                                              unsigned int mtry,
-                                             bool continuousResponse,
                                              std::default_random_engine& rState)
     {
-        // auto-assign mtry if it is not provided
-        unsigned int nPredictors = predictorsIdx.size();
-
-        if( mtry == 0 )
-            mtry = ( continuousResponse ?
-                              std::floor( nPredictors>15 ? nPredictors/3 : (nPredictors > 5 ? 5 : nPredictors) ) :
-                              std::floor( sqrt(nPredictors) )
-                   );
-
         // sample mtry variables **without replacement** from all the variables
-        std::vector<unsigned int> indices(nPredictors);
+        std::vector<unsigned int> indices( predictorsIdx.size() );
         std::iota(indices.begin(), indices.end(), 0);
         std::shuffle(indices.begin(), indices.end(), rState);
         indices.resize(mtry);
@@ -87,8 +77,7 @@ private:
                                 const std::vector<unsigned int>& predictorsIdx,
                                 const std::vector<unsigned int>& subset,
                                 std::default_random_engine &rState, // feed the current state back to the call context
-                                unsigned int mtry = 0,
-                                bool  isRandomForest = true,
+                                unsigned int mtry, // if !=0, this is RandomForest
                                 size_t MIN_ENTRIES = 5) // criterion to stop growing tree
                                 // an optional last argument here defines a number
                                 // of events in terminal nodes and can help to
@@ -178,14 +167,13 @@ private:
                               (size_r ? double(gini_r)/size_r : 0);
                 };
 
-        // the only Random-Forest specific step here: draw a random subset of predictors
+        // the only Random-Forest specific step here: draw a random subset of predictors if mtry!=0
         SplitVars vars;
-        if( isRandomForest ){
+        if( mtry ){
             vars = generateRandomSplitVars(
                       df.getSchema(),
                       predictorsIdx,
                       mtry,
-                      df.getLevels(responseIdx).size() == 0,
                       rState
                    );
         } else {
@@ -327,8 +315,8 @@ private:
         if( left_subset.size() > 0 && right_subset.size() > 0 ){
 
             // another good place to use the threads
-            Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  rState, mtry, isRandomForest);
-            Tree *right_subtree = findBestSplits(df, responseIdx, predictorsIdx, right_subset, rState, mtry, isRandomForest);
+            Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  rState, mtry, MIN_ENTRIES);
+            Tree *right_subtree = findBestSplits(df, responseIdx, predictorsIdx, right_subset, rState, mtry, MIN_ENTRIES);
 
             left_subtree->parent  = tree;
             right_subtree->parent = tree;
@@ -349,6 +337,7 @@ private:
             }
 
         } else {
+            // turned out this is a pure node
             if( df.getLevels(responseIdx).size() == 0 )
                 tree->nodes.push_back( Tree::Node( double(tree->sum/size) ) );
             else
@@ -384,7 +373,7 @@ public:
             std::copy(end,               shuffled.cend(), std::back_inserter(trainSet));
             std::copy(begin,             end,             std::back_inserter(validSet));
             // get the tree
-            Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, trainSet, rState, false);
+            Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, trainSet, rState, 0);
             // and prune it
             std::map<double,std::shared_ptr<Tree>> m = tree->prune(); // guaranteed to create a new tree
             delete tree;
@@ -457,7 +446,7 @@ public:
 
         double bestAlpha = it->first;
 
-        Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, shuffled, rState, false);
+        Tree *tree = findBestSplits(df, responseIdx, predictorsIdx, shuffled, rState, 0);
         std::map<double,std::shared_ptr<Tree>> m = tree->prune();
         delete tree;
         auto model = m.lower_bound(bestAlpha);
@@ -465,14 +454,31 @@ public:
         return model->second;
     }
 
-    static std::shared_ptr<Tree> trainRFtree(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, unsigned int seed) {
+    static std::shared_ptr<Tree> trainRFtree(const DataFrame& df,
+                                             const std::vector<unsigned int>& predictorsIdx,
+                                             unsigned int responseIdx,
+                                             unsigned int seed = 0,
+                                             unsigned int mtry = 0, // default value means auto-assign mtry
+                                             double bootstrapSize = 0.632,
+                                             unsigned int minNodeEntries = 5) {
 
-        std::default_random_engine rState(seed); // reproducibility: same seed results in identical trees
+        // reproducibility: same seed results in identical trees
+        std::default_random_engine rState(seed);
 
         std::shared_ptr<Tree> tree( new Tree() );
 
-        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*0.625, rState, false); //true);
-        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, rState, 0, true, 5);
+        // auto-assign mtry if it is not provided
+        if( mtry == 0 ){
+            unsigned int nPredictors = predictorsIdx.size();
+            mtry = ( df.getLevels(responseIdx).size() == 0 ? // continuous response?
+                              std::floor( nPredictors>15 ? nPredictors/3 : (nPredictors > 5 ? 5 : nPredictors) ) :
+                              std::floor( std::sqrt(nPredictors) )
+                   );
+        }
+
+        // sample with replacement a fraction of data for training a new tree
+        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*bootstrapSize, rState, true);
+        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, rState, mtry, minNodeEntries);
 
         tree->nodes.reserve(tr->tree_size);
         tr->vectorize(tree->nodes);

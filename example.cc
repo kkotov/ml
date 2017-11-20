@@ -61,7 +61,7 @@ int main(void){
     RandomForest rf1;
     std::vector<unsigned int> predictorsIdx = {V1,V2};
     unsigned int responseIdx = V3;
-    rf1.train(dfTrain,predictorsIdx,responseIdx,100,std::cout);
+    rf1.train(dfTrain, predictorsIdx, responseIdx, 100, std::cout);
 
     // see how well classification is doing
     std::map<long,std::map<long,unsigned int>> confusionMatrix;
@@ -105,7 +105,7 @@ int main(void){
     RandomForest rf2;
     predictorsIdx = {V2,V3};
     responseIdx = V1;
-    rf2.train(dfTrain,predictorsIdx,responseIdx,100,std::cout);
+    rf2.train(dfTrain, predictorsIdx, responseIdx, 100, std::cout);
 
     std::cout << std::endl << "Regression performance: " << std::endl;
     double bias = 0, var = 0;

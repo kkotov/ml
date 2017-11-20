@@ -47,7 +47,13 @@ public:
         return it->first;
     }
 
-    void train(const DataFrame& df, const std::vector<unsigned int>& predictorsIdx, unsigned int responseIdx, size_t nTrees, std::ostream &log) {
+    void train(const DataFrame& df,
+               const std::vector<unsigned int>& predictorsIdx,
+               unsigned int responseIdx,
+               size_t nTrees,
+               std::ostream &log,
+               unsigned int mtry = 0, // use auto-assign for mtry
+               unsigned int seed = 0) {
 
         ensemble.resize(nTrees);
 
@@ -84,7 +90,10 @@ public:
                                                  df,
                                                  predictorsIdx,
                                                  responseIdx,
-                                                 t*100
+                                                 seed + t*100,
+                                                 mtry,
+                                                 0.632, // bootstrapSize
+                                                 5      // minNodeEntries
                                       );
                 tasks++;
             } else freeThread = (freeThread + 1) % maxThreads;
