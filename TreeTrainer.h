@@ -27,21 +27,9 @@ private:
                                              bool continuousResponse,
                                              std::default_random_engine& rState)
     {
-        // turn multilevel categorical predictors into dummy variables
-        SplitVars oneHOTencoded;
+        // auto-assign mtry if it is not provided
+        unsigned int nPredictors = predictorsIdx.size();
 
-        for(unsigned int idx: predictorsIdx){
-            unsigned int nLevels = schema[idx].size();
-            if( nLevels > 0 )
-                for(unsigned int levelIdx = 0; levelIdx < nLevels; ++levelIdx)
-                    oneHOTencoded.push_back(std::make_pair(idx, schema[idx][levelIdx]));
-            else
-                oneHOTencoded.push_back(std::make_pair(idx,0));
-        }
-
-        unsigned int nPredictors = oneHOTencoded.size();
-
-        // auto-assign mtry
         if( mtry == 0 )
             mtry = ( continuousResponse ?
                               std::floor( nPredictors>15 ? nPredictors/3 : (nPredictors > 5 ? 5 : nPredictors) ) :
@@ -52,12 +40,22 @@ private:
         std::vector<unsigned int> indices(nPredictors);
         std::iota(indices.begin(), indices.end(), 0);
         std::shuffle(indices.begin(), indices.end(), rState);
+        indices.resize(mtry);
 
-        SplitVars vars;
-        for(unsigned int i=0; i<mtry; ++i)
-            vars.push_back( oneHOTencoded[i] );
+        // turn multilevel categorical predictors into dummy variables
+        SplitVars oneHOTencoded;
 
-        return vars;
+        for(unsigned int i : indices){
+            unsigned int idx = predictorsIdx[i];
+            unsigned int nLevels = schema[idx].size();
+            if( nLevels > 0 )
+                for(unsigned int levelIdx = 0; levelIdx < nLevels; ++levelIdx)
+                    oneHOTencoded.push_back(std::make_pair(idx, levelIdx));
+            else
+                oneHOTencoded.push_back(std::make_pair(idx,0));
+        }
+
+        return oneHOTencoded;
     }
 
     static std::vector<unsigned int> sample(unsigned int nTotal,
@@ -89,6 +87,7 @@ private:
                                 const std::vector<unsigned int>& predictorsIdx,
                                 const std::vector<unsigned int>& subset,
                                 std::default_random_engine &rState, // feed the current state back to the call context
+                                unsigned int mtry = 0,
                                 bool  isRandomForest = true,
                                 size_t MIN_ENTRIES = 5) // criterion to stop growing tree
                                 // an optional last argument here defines a number
@@ -185,7 +184,7 @@ private:
             vars = generateRandomSplitVars(
                       df.getSchema(),
                       predictorsIdx,
-                      0,
+                      mtry,
                       df.getLevels(responseIdx).size() == 0,
                       rState
                    );
@@ -328,8 +327,8 @@ private:
         if( left_subset.size() > 0 && right_subset.size() > 0 ){
 
             // another good place to use the threads
-            Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  rState, isRandomForest);
-            Tree *right_subtree = findBestSplits(df, responseIdx, predictorsIdx, right_subset, rState, isRandomForest);
+            Tree *left_subtree  = findBestSplits(df, responseIdx, predictorsIdx, left_subset,  rState, mtry, isRandomForest);
+            Tree *right_subtree = findBestSplits(df, responseIdx, predictorsIdx, right_subset, rState, mtry, isRandomForest);
 
             left_subtree->parent  = tree;
             right_subtree->parent = tree;
@@ -472,8 +471,8 @@ public:
 
         std::shared_ptr<Tree> tree( new Tree() );
 
-        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*0.632, rState, false); //true);
-        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, rState, true);
+        std::vector<unsigned int> s = sample(df.nrow(), df.nrow()*0.625, rState, false); //true);
+        Tree *tr = findBestSplits(df, responseIdx, predictorsIdx, s, rState, 0, true, 5);
 
         tree->nodes.reserve(tr->tree_size);
         tr->vectorize(tree->nodes);
