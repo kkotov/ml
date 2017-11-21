@@ -26,7 +26,7 @@ private:
                                              unsigned int mtry,
                                              std::default_random_engine& rState)
     {
-        // sample mtry variables **without replacement** from all the variables
+        // sample mtry variables without replacement from all the variables
         std::vector<unsigned int> indices( predictorsIdx.size() );
         std::iota(indices.begin(), indices.end(), 0);
         std::shuffle(indices.begin(), indices.end(), rState);
