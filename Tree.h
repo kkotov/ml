@@ -78,7 +78,7 @@ private:
             return root.value;
 
         if( root.value.type == Variable::Continuous ){
-            if( root.value.asFloating > row[root.position].asFloating )
+            if( root.value.asFloating >= row[root.position].asFloating )
                 return traverseVectorized(row,nodes[root.left_child]);
             else
                 return traverseVectorized(row,nodes[root.right_child]);

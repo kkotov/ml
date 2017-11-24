@@ -141,7 +141,7 @@ private:
 
         // find best split
         size_t    bestSplitVar = 0;
-        long long bestSplitPoint = 0; // integral split points to a row for continuous predictors and to a level for factors
+        long long bestSplitPoint = -1; // integral split points to a row for continuous predictors and to a level's index for factors
         double    bestSplitMetric = std::numeric_limits<double>::max();
 
         // functional form of Eq 9.13 on p.307 of ESLII (*_l - left to the cut, *_r - right)
@@ -191,13 +191,13 @@ private:
         // loop over split candidates, greedily select the best one
         for(std::pair<unsigned int,unsigned int> var : vars){
 
-            long long bestSplitPointSoFar = 0;
+            long long bestSplitPointSoFar = -1; // that'll point to a row or left -1 if no split was found
             double    bestMetricSoFar = std::numeric_limits<double>::max();
 
             // continuous predictor?
             if( df.getLevels(var.first).size() == 0 ){
 
-                // order training entries (well, through their indices) along the candidate variable for the split
+                // order training entries (well, through their indices) along the candidate predictor for the split
                 std::vector<unsigned int> indices(size);
                 std::iota(indices.begin(),indices.end(),0);
                 std::sort(indices.begin(),
@@ -207,12 +207,21 @@ private:
                           }
                 );
 
+                // current predictor is one repeated value, no split can be done in this case, just move on next predictor
+                if( std::abs( df[ subset[indices[0]]      ][var.first].asFloating -
+                              df[ subset[indices[size-1]] ][var.first].asFloating
+                            ) <= std::numeric_limits<float>::min() )
+                    continue;
+
                 // regression for continuous case else classification for multilevel response
                 if( df.getLevels(responseIdx).size() == 0 ){
                     // start with all points being on one (right) side of the split
                     double sum_r = tree->sum, sum2_r = tree->sum2, sum_l = 0, sum2_l = 0;
                     size_t size_l = 0, size_r = size;
-                    bestMetricSoFar = rssMetric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
+                    // retarded values for the "look-ahead" loop below
+                    int    prev_row = -1;
+                    double prev_val = std::numeric_limits<double>::lowest();
+                    double prev_metric = rssMetric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
                     // and run over df subset sorted along current predictor
                     for(unsigned int index : indices){
                         unsigned int row = subset[index];
@@ -223,18 +232,31 @@ private:
                         sum2_l += df[row][responseIdx].asFloating * df[row][responseIdx].asFloating;
                         size_r--;
                         size_l++;
-                        double newMetric = rssMetric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
+                        double new_metric = rssMetric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
                         // check for the best split
-                        if( newMetric < bestMetricSoFar ){
-                            bestMetricSoFar     = newMetric;
-                            bestSplitPointSoFar = row;
+                        //  caution here: repeating predictor's values cannot be ordered;
+                        //  that means I either move arond the split (from right to left) all of the values or none of them;
+                        //  therefore, I see if current value advanced and update the split for the retarded row if needed
+                        if( prev_val < df[row][var.first].asFloating && prev_metric < bestMetricSoFar ){
+                            bestMetricSoFar     = prev_metric;
+                            bestSplitPointSoFar = prev_row; // first time I'm here it is still -1
                         }
+                        prev_metric = new_metric;
+                        prev_val = df[row][var.first].asFloating + std::numeric_limits<double>::min();
+                        prev_row = row;
                     }
+                    // no best split was achieved which may happen only if response doesn't ever change
+                    //  in such case no best split may be achieved with any predictor, just terminate the search
+                    if( bestSplitPointSoFar < 0 ) break;
+
                 } else { // multilevel response
                     // start with all points being on one (right) side of the split
                     std::unordered_map<long long, size_t> counts_r( tree->levelCounts ), counts_l;
                     size_t size_l = 0, size_r = size;
-                    bestMetricSoFar = giniMetric(counts_l,size_l,counts_r,size_r);
+                    // retarded values for the "look-ahead" loop below
+                    int    prev_row = -1;
+                    double prev_val = std::numeric_limits<double>::lowest();
+                    double prev_metric = giniMetric(counts_l,size_l,counts_r,size_r);
                     for(unsigned int index : indices){
                         unsigned int row = subset[index];
                         // advancing the split - moving a point from right to left of the split
@@ -242,18 +264,28 @@ private:
                         counts_l[ df[row][responseIdx].asIntegral ]++;
                         size_r--;
                         size_l++;
-                        double newMetric = giniMetric(counts_l,size_l,counts_r,size_r);
-                        if( newMetric < bestMetricSoFar ){
-                            bestMetricSoFar     = newMetric;
-                            bestSplitPointSoFar = row;
+                        double new_metric = giniMetric(counts_l,size_l,counts_r,size_r);
+                        // check for the best split
+                        //  same caution as in the previous block: repeating predictor's values cannot be ordered;
+                        //  that means I either move arond the split (from right to left) all of the values or none of them;
+                        //  therefore, I see if current value advanced and update the split for the retarded row if needed
+                        if( prev_val < df[row][var.first].asFloating && prev_metric < bestMetricSoFar ){
+                            bestMetricSoFar     = prev_metric;
+                            bestSplitPointSoFar = prev_row; // first time I'm here it is still -1
                         }
+                        prev_metric = new_metric;
+                        prev_val = df[row][var.first].asFloating + std::numeric_limits<double>::min();
+                        prev_row = row;
                     }
+                    // no best split was achieved which may happen only if response doesn't ever change
+                    //  in such case no best split may be achieved with any predictor, just terminate the search
+                    if( bestSplitPointSoFar < 0 ) break;
                 }
 
             } else {
                 // categorical predictor
                 long level = df.getLevels(var.first)[var.second];
-                bestSplitPointSoFar = level;
+                bestSplitPointSoFar = var.second; // this is index of the level
                 // regression for continuous case else classification for multilevel response
                 if( df.getLevels(responseIdx).size() == 0 ){
                     double sum_match = 0, sum2_match = 0;
@@ -266,10 +298,19 @@ private:
                             size_match++;
                         }
                     }
-                    bestMetricSoFar =
-                        rssMetric(sum_match, sum2_match, size_match,
-                                  tree->sum-sum_match, tree->sum2-sum2_match, size-size_match
-                        );
+                    // if response doesn't change terminate the search
+                    if( false ){
+                    }
+                    // if there are no other levels, no best split exist in this predictor
+                    if( size_match == 0 || size_match == size ){
+                        bestSplitPointSoFar = -1;
+                        continue;
+                    } else
+                        bestMetricSoFar =
+                            rssMetric(sum_match, sum2_match, size_match,
+                                      tree->sum-sum_match, tree->sum2-sum2_match, size-size_match
+                            );
+
                 } else { // multilevel response
                     std::unordered_map<long long, size_t> counts_match, counts_mismatch;
                     size_t size_match = 0;
@@ -281,8 +322,13 @@ private:
                         } else
                             counts_mismatch[ df[row][responseIdx].asIntegral ]++;
                     }
-                    bestMetricSoFar =
-                        giniMetric(counts_match,size_match,counts_mismatch,size-size_match);
+                    // if there are no other levels, no best split exist in this predictor
+                    if( size_match == 0 || size_match == size ){
+                        bestSplitPointSoFar = -1;
+                        continue;
+                    } else 
+                        bestMetricSoFar =
+                            giniMetric(counts_match,size_match,counts_mismatch,size-size_match);
                 }
             }
 
@@ -294,22 +340,24 @@ private:
         }
 
         std::vector<unsigned int> left_subset, right_subset;
-        for(unsigned int i : subset)
-            switch(  df[i][bestSplitVar].type ){
-                case Variable::Continuous:
-                    if( df[i][bestSplitVar].asFloating < df[bestSplitPoint][bestSplitVar].asFloating )
-                        left_subset.push_back(i);
-                    else
-                        right_subset.push_back(i);
-                break ;
-                case Variable::Categorical:
-                    if( df[i][bestSplitVar].asIntegral == bestSplitPoint )
-                        left_subset.push_back(i);
-                    else
-                        right_subset.push_back(i);
+
+        if( bestSplitPoint>=0 )
+            for(unsigned int i : subset)
+                switch(  df[i][bestSplitVar].type ){
+                    case Variable::Continuous:
+                        if( df[i][bestSplitVar].asFloating <= df[bestSplitPoint][bestSplitVar].asFloating )
+                            left_subset.push_back(i);
+                        else
+                            right_subset.push_back(i);
                     break ;
-                default : return new Tree(); break;
-        }
+                    case Variable::Categorical:
+                        if( df[i][bestSplitVar].asIntegral == df.getLevels(bestSplitVar)[bestSplitPoint] )
+                            left_subset.push_back(i);
+                        else
+                            right_subset.push_back(i);
+                        break ;
+                    default : return new Tree(); break;
+            }
 
         // Continue growing tree until any of the subsets is not empty
         if( left_subset.size() > 0 && right_subset.size() > 0 ){
@@ -343,6 +391,15 @@ private:
             else
                 tree->nodes.push_back( Tree::Node( long(tree->majorityVote) ) );
             tree->tree_size = 1; // leaf
+/*
+std::cout << "left_subset: " << left_subset.size() << " right_subset: " << right_subset.size()
+          << " bestSplitVar= " << bestSplitVar
+          << " bestSplitPoint= " << bestSplitPoint //df[bestSplitPoint][bestSplitVar].asFloating
+          << " bestSplitMetric= " << bestSplitMetric << std::endl;
+*/
+//            for(unsigned int i : subset)
+//                std::cout << df[i][bestSplitVar].asFloating << " : " << df[i][responseIdx].asFloating << ", "; // << std::endl;
+//            std::cout << std::endl;
         }
 
         return tree;

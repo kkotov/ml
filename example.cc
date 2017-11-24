@@ -47,6 +47,8 @@ int main(void){
     // countAllLevels has to be called in the end of reading input with categorical variables
     df.countAllLevels();
 
+    srand(0);
+
     // split the data frame into training and test data partitions:
     DataFrame dfTrain, dfTest;
     for(size_t row=0; row<df.nrow(); row++)
@@ -61,7 +63,7 @@ int main(void){
     RandomForest rf1;
     std::vector<unsigned int> predictorsIdx = {V1,V2};
     unsigned int responseIdx = V3;
-    rf1.train(dfTrain, predictorsIdx, responseIdx, 100, std::cout);
+    rf1.train(dfTrain, predictorsIdx, responseIdx, 100, std::cout, 1);
 
     // see how well classification is doing
     std::map<long,std::map<long,unsigned int>> confusionMatrix;
