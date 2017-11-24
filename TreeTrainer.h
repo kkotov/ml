@@ -207,7 +207,8 @@ private:
                           }
                 );
 
-                // current predictor is one repeated value, no split can be done in this case, just move on next predictor
+                // current predictor is one repeated value, no split can be applied in such case
+                //  just move on to the next predictor
                 if( std::abs( df[ subset[indices[0]]      ][var.first].asFloating -
                               df[ subset[indices[size-1]] ][var.first].asFloating
                             ) <= std::numeric_limits<float>::min() )
@@ -284,8 +285,8 @@ private:
 
             } else {
                 // categorical predictor
-                long level = df.getLevels(var.first)[var.second];
                 bestSplitPointSoFar = var.second; // this is index of the level
+                long level = df.getLevels(var.first)[bestSplitPointSoFar];
                 // regression for continuous case else classification for multilevel response
                 if( df.getLevels(responseIdx).size() == 0 ){
                     double sum_match = 0, sum2_match = 0;
@@ -381,7 +382,7 @@ private:
                 local_root.value.asFloating = df[bestSplitPoint][bestSplitVar].asFloating;
             } else {
                 local_root.value.type = Variable::Categorical;
-                local_root.value.asIntegral = bestSplitPoint;
+                local_root.value.asIntegral = df.getLevels(bestSplitVar)[bestSplitPoint];
             }
 
         } else {
@@ -391,15 +392,6 @@ private:
             else
                 tree->nodes.push_back( Tree::Node( long(tree->majorityVote) ) );
             tree->tree_size = 1; // leaf
-/*
-std::cout << "left_subset: " << left_subset.size() << " right_subset: " << right_subset.size()
-          << " bestSplitVar= " << bestSplitVar
-          << " bestSplitPoint= " << bestSplitPoint //df[bestSplitPoint][bestSplitVar].asFloating
-          << " bestSplitMetric= " << bestSplitMetric << std::endl;
-*/
-//            for(unsigned int i : subset)
-//                std::cout << df[i][bestSplitVar].asFloating << " : " << df[i][responseIdx].asFloating << ", "; // << std::endl;
-//            std::cout << std::endl;
         }
 
         return tree;
