@@ -16,7 +16,7 @@
 #include "DataFrame.h"
 #include "Tree.h"
 
-// thread-safe stateless class encomassing static functions only
+// thread-safe stateless class encompassing static functions only
 class TreeTrainer {
 private:
     typedef std::vector<std::pair<unsigned int,unsigned int>> SplitVars; // variable index and level index (if categorical)
@@ -71,7 +71,7 @@ private:
                );
     }
 
-    // thread-safe implementation of CART with gini/entropy/rms purity metrices
+    // thread-safe implementation of CART with gini/entropy/rms purity metrics
     static Tree* findBestSplits(const DataFrame& df,
                                 unsigned int responseIdx,
                                 const std::vector<unsigned int>& predictorsIdx,
@@ -94,8 +94,8 @@ private:
 
         if( df.getLevels(responseIdx).size() == 0 ){
             // response is Variable::Continuous
-            // caclulate general regression characteristics on training events:
-            //  RSS, sum, and sum of squares of responces 
+            // calculate general regression characteristics on training events:
+            //  RSS, sum, and sum of squares of responses 
             tree->rss  = 0;
             tree->sum  = 0;
             tree->sum2 = 0;
@@ -108,7 +108,7 @@ private:
             tree->metric = tree->rss;
         } else {
             // response is Variable::Categorical
-            // caclulate general classification characteristics on training events:
+            // calculate general classification characteristics on training events:
             //  gini and cross-entropy
             tree->gini = 0;
             tree->crossEntropy = 0;
@@ -236,16 +236,22 @@ private:
                         double new_metric = rssMetric(sum_l,sum2_l,size_l,sum_r,sum2_r,size_r);
                         // check for the best split
                         //  caution here: repeating predictor's values cannot be ordered;
-                        //  that means I either move arond the split (from right to left) all of the values or none of them;
+                        //  that means I either move around the split (from right to left) all of the values or none of them;
                         //  therefore, I see if current value advanced and update the split for the retarded row if needed
                         if( prev_val < df[row][var.first].asFloating && prev_metric < bestMetricSoFar ){
                             bestMetricSoFar     = prev_metric;
                             bestSplitPointSoFar = prev_row; // first time I'm here it is still -1
                         }
                         prev_metric = new_metric;
-                        prev_val = df[row][var.first].asFloating + std::numeric_limits<double>::min();
+                        prev_val = df[row][var.first].asFloating + std::numeric_limits<float>::min();
                         prev_row = row;
                     }
+                    // obviously, because of metric property to to be the same on both ends
+                    //  there is no use in the block below
+                    //if( prev_metric < bestMetricSoFar ){
+                    //    bestMetricSoFar     = prev_metric;
+                    //    bestSplitPointSoFar = prev_row;
+                    //}
                     // no best split was achieved which may happen only if response doesn't ever change
                     //  in such case no best split may be achieved with any predictor, just terminate the search
                     if( bestSplitPointSoFar < 0 ) break;
@@ -268,14 +274,14 @@ private:
                         double new_metric = giniMetric(counts_l,size_l,counts_r,size_r);
                         // check for the best split
                         //  same caution as in the previous block: repeating predictor's values cannot be ordered;
-                        //  that means I either move arond the split (from right to left) all of the values or none of them;
+                        //  that means I either move around the split (from right to left) all of the values or none of them;
                         //  therefore, I see if current value advanced and update the split for the retarded row if needed
                         if( prev_val < df[row][var.first].asFloating && prev_metric < bestMetricSoFar ){
                             bestMetricSoFar     = prev_metric;
                             bestSplitPointSoFar = prev_row; // first time I'm here it is still -1
                         }
                         prev_metric = new_metric;
-                        prev_val = df[row][var.first].asFloating + std::numeric_limits<double>::min();
+                        prev_val = df[row][var.first].asFloating + std::numeric_limits<float>::min();
                         prev_row = row;
                     }
                     // no best split was achieved which may happen only if response doesn't ever change
@@ -520,7 +526,7 @@ public:
         if( mtry == 0 ){
             unsigned int nPredictors = predictorsIdx.size();
             mtry = ( df.getLevels(responseIdx).size() == 0 ? // continuous response?
-                              std::floor( nPredictors>15 ? nPredictors/3 : (nPredictors > 5 ? 5 : nPredictors) ) :
+                              std::floor( nPredictors>15 ? nPredictors/3 : (nPredictors > 5 ? 5 : nPredictors/2) ) :
                               std::floor( std::sqrt(nPredictors) )
                    );
         }

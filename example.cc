@@ -107,7 +107,7 @@ int main(void){
     RandomForest rf2;
     predictorsIdx = {V2,V3};
     responseIdx = V1;
-    rf2.train(dfTrain, predictorsIdx, responseIdx, 100, std::cout);
+    rf2.train(dfTrain, predictorsIdx, responseIdx, 100, std::cout, 1);
 
     std::cout << std::endl << "Regression performance: " << std::endl;
     double bias = 0, var = 0;
