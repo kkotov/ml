@@ -96,7 +96,7 @@ public:
                                                  responseIdx,
                                                  seed + task + 1, // random sequences for 0 and 1 are identical -> offset by 1
                                                  mtry,
-                                                 0.632, // bootstrapSize
+                                                 1., // bootstrapSize, the underlying call draws samples _with_ replacement
                                                  5      // minNodeEntries
                                       );
                 treeNumber[freeThread] = task;

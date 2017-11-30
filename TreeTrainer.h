@@ -142,6 +142,7 @@ private:
         // find best split
         size_t    bestSplitVar = 0;
         long long bestSplitPoint = -1; // integral split points to a row for continuous predictors and to a level's index for factors
+        long long nextSplitPoint = -1; // row following the best split row
         double    bestSplitMetric = std::numeric_limits<double>::max();
 
         // functional form of Eq 9.13 on p.307 of ESLII (*_l - left to the cut, *_r - right)
@@ -192,6 +193,7 @@ private:
         for(std::pair<unsigned int,unsigned int> var : vars){
 
             long long bestSplitPointSoFar = -1; // that'll point to a row or left -1 if no split was found
+            long long nextSplitPointSoFar = -1; // the same
             double    bestMetricSoFar = std::numeric_limits<double>::max();
 
             // continuous predictor?
@@ -241,17 +243,14 @@ private:
                         if( prev_val < df[row][var.first].asFloating && prev_metric < bestMetricSoFar ){
                             bestMetricSoFar     = prev_metric;
                             bestSplitPointSoFar = prev_row; // first time I'm here it is still -1
+                            nextSplitPointSoFar = row;
                         }
                         prev_metric = new_metric;
                         prev_val = df[row][var.first].asFloating + std::numeric_limits<float>::min();
                         prev_row = row;
                     }
-                    // obviously, because of metric property to to be the same on both ends
-                    //  there is no use in the block below
-                    //if( prev_metric < bestMetricSoFar ){
-                    //    bestMetricSoFar     = prev_metric;
-                    //    bestSplitPointSoFar = prev_row;
-                    //}
+                    // because of metric property to to be the same on both ends I ignore the last row
+
                     // no best split was achieved which may happen only if response doesn't ever change
                     //  in such case no best split may be achieved with any predictor, just terminate the search
                     if( bestSplitPointSoFar < 0 ) break;
@@ -279,6 +278,7 @@ private:
                         if( prev_val < df[row][var.first].asFloating && prev_metric < bestMetricSoFar ){
                             bestMetricSoFar     = prev_metric;
                             bestSplitPointSoFar = prev_row; // first time I'm here it is still -1
+                            nextSplitPointSoFar = row;
                         }
                         prev_metric = new_metric;
                         prev_val = df[row][var.first].asFloating + std::numeric_limits<float>::min();
@@ -342,6 +342,7 @@ private:
             if( bestMetricSoFar < bestSplitMetric ){
                 bestSplitVar    = var.first;
                 bestSplitPoint  = bestSplitPointSoFar;
+                nextSplitPoint  = nextSplitPointSoFar;
                 bestSplitMetric = bestMetricSoFar;
             }
         }
@@ -385,7 +386,8 @@ private:
             local_root.position = bestSplitVar;
             if( df.getLevels(bestSplitVar).size() == 0 ){
                 local_root.value.type = Variable::Continuous;
-                local_root.value.asFloating = df[bestSplitPoint][bestSplitVar].asFloating;
+                local_root.value.asFloating = ( df[bestSplitPoint][bestSplitVar].asFloating +
+                                                df[nextSplitPoint][bestSplitVar].asFloating ) / 2.;
             } else {
                 local_root.value.type = Variable::Categorical;
                 local_root.value.asIntegral = df.getLevels(bestSplitVar)[bestSplitPoint];

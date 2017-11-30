@@ -14,8 +14,8 @@ The first one renders useless batch-processing system while the second disfavors
 all-in-one machine learning libraries. Why still not to use available light-weight C++
 packages, that generations of CS students implement and put on github? It turns out
 that most of those are limited to either classification or regression (not both)
-and rarely consider categorical predictors. On the other hand my version also has
-limitations as it does not, for example, support *ordinal* categorical variables.
+and rarely consider categorical predictors. My version handles both, but it does
+not support *ordinal* categorical variables.
 
 ## Design
 
@@ -61,7 +61,7 @@ ggplot(df,aes(x=V1,y=V2,type=V3,color=V3)) + geom_point(shape = 1, size = 0.1)
 
 The file can be read processed with [example.cc](https://github.com/kkotov/ml/blob/master/example.cc) code:
 ```
-g++ -Wl,--no-as-needed -g -Wall -std=c++11 -o rf example.cc -lpthread
+make
 ./rf
 ```
 resulting in the following printout:
@@ -106,6 +106,15 @@ resulting in the following printout:
 3      | 117 | 142 | 4741
 
 [1] "bias =  0.0006507 , sd =  0.6773"
+
+## I/O format
+
+Each tree is serialized into a vector using pre-order traversal.
+Every node (element of the vector) is described by a single line comprised of:
+1. sequential node index
+2. split value for non-terminal nodes and regression/classification value for terminal nodes
+3. split variable number
+4. indices of left and right descendants in the vector, or 0 if non exist
 
 ## Bibliography:
 
