@@ -208,6 +208,8 @@ private:
                               return df[ subset[i] ][var.first].asFloating < df[ subset[j] ][var.first].asFloating;
                           }
                 );
+                // Note: with just a bit of modification of the code below the NlogN complexity from
+                //  sorting above could have been avoided leaving us with much faster linear performance
 
                 // current predictor is one repeated value, no split can be applied in such case
                 //  just move on to the next predictor

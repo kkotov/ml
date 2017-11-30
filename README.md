@@ -109,7 +109,7 @@ resulting in the following printout:
 
 ## I/O format
 
-Each tree is serialized into a vector using pre-order traversal.
+Each tree is serialized into a vector using preorder traversal.
 Every node (element of the vector) is described by a single line comprised of:
 1. sequential node index
 2. split value for non-terminal nodes and regression/classification value for terminal nodes
