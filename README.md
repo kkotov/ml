@@ -1,3 +1,4 @@
+[![Travis Build Status](https://travis-ci.org/kkotov/ml.svg?branch=master)](https://travis-ci.org/kkotov/ml)
 # Random Forest
 
 ## Introduction
@@ -62,7 +63,7 @@ ggplot(df,aes(x=V1,y=V2,type=V3,color=V3)) + geom_point(shape = 1, size = 0.1)
 The file can be read processed with [example.cc](https://github.com/kkotov/ml/blob/master/example.cc) code:
 ```
 make
-./rf
+./example
 ```
 resulting in the following printout:
 
