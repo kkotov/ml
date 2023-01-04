@@ -5,8 +5,8 @@
 
 This package is yet another Random Forest implementation.
 A quick review of several off-the-shelf packages uncovered that they all have the same
-[fatal flaw](http://www.drdobbs.com/windows/a-brief-history-of-windows-programming-r/225701475).
-Apart from jokes, I have two rather specific requirements in our [EMTF](https://kkotov.github.io/emtf.html)
+[fatal flaw](http://m.blog.chinaunix.net/uid-20545494-id-3155107.html).
+Apart from jokes, I have two rather specific requirements in our [EMTF](https://kkotov.github.io/cern/emtf.html)
 system. They are:
 1) real-time application: prediction should be quick and made on event-by-event basis
 2) light-weight stand alone C++ code: easy to integrate in already existing project
